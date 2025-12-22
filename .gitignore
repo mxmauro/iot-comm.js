@@ -1,0 +1,6 @@
+*.~*
+*.tgz
+/.vscode/
+/node_modules/
+/dist/browser/
+/dist/node/

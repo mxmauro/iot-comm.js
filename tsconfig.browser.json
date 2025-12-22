@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"paths": {
+			"@/ws": [ "./src/ws/browser.ts" ],
+			"@/crypto/aes": [ "./src/crypto/aes.browser.ts" ],
+			"@/crypto/ecp": [ "./src/crypto/ecp.browser.ts" ],
+			"@/crypto/hash": [ "./src/crypto/hash.browser.ts" ],
+			"@/crypto/random": [ "./src/crypto/random.browser.ts" ]
+		}
+	}
+}

@@ -1,0 +1,38 @@
+<!doctype html>
+<html data-theme="dark" lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoT-Comm.js Demo</title>
+<link rel="stylesheet" href="css/pico.min.css">
+<link rel="stylesheet" href="css/pico.colors.min.css">
+<link rel="stylesheet" href="css/effects.css">
+<link rel="stylesheet" href="css/toastify.css">
+<style>
+html {
+	font-size: 0.95rem;
+	--font-size-scale: 1.15;
+}
+</style>
+<script type="text/javascript" src="/__wds-outside-root__/2/dist/umd/index.min.js"></script>
+<script type="importmap">
+	{
+		"imports": {
+			"preact": "./js/preact.mjs",
+			"preact/hooks": "./js/preact-hooks.mjs",
+			"htm/preact": "./js/htm.mjs",
+			"toastify": "./js/toastify-es.js"
+		}
+	}
+</script>
+</head>
+<body>
+<script type="module">
+import { render } from 'preact';
+import { Root } from './js/components/root.js';
+import { html } from './js/utils/html.js';
+
+render(html`<${Root} />`, document.body);
+</script>
+</body>
+</html>

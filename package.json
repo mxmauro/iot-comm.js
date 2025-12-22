@@ -1,0 +1,73 @@
+{
+	"name": "@mxmauro/iot-comm.js",
+	"version": "0.1.0",
+	"description": "Javascript library to communicate with ESP IoT devices using the IoT-Comm library",
+	"license": "MIT",
+	"author": "Mauro H. Leggieri",
+	"type": "module",
+	"main": "./dist/node/index.cjs",
+	"module": "./dist/node/index.js",
+	"types": "./dist/node/index.d.ts",
+	"browser": "./dist/browser/index.js",
+	"exports": {
+		".": {
+			"browser": {
+				"import": "./dist/browser/index.js",
+				"types": "./dist/browser/index.d.ts"
+			},
+			"node": {
+				"import": "./dist/node/index.js",
+				"require": "./dist/node/index.cjs",
+				"types": "./dist/node/index.d.ts"
+			},
+			"default": {
+				"import": "./dist/node/index.js",
+				"require": "./dist/node/index.cjs",
+				"types": "./dist/node/index.d.ts"
+			}
+		},
+		"./umd": "./dist/umd/index.js"
+	},
+	"files": [
+		"dist", "package.json", "README.md", "LICENSE"
+	],
+	"keywords": [
+		"iot",
+		"websocket",
+		"communication",
+		"browser",
+		"node"
+	],
+	"homepage": "https://github.com/mxmauro/iot-comm.js",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/mxmauro/iot-comm.js.git"
+	},
+	"scripts": {
+		"build": "biome check && rimraf -I ./dist && cross-env NODE_ENV=production rslib build",
+		"build:doctor": "cross-env RSDOCTOR=true npm run build",
+		"biome:check": "biome check --verbose",
+		"biome:format": "biome format --fix",
+		"dev:browser": "wds --config web-dev-server.config.mjs"
+	},
+	"dependencies": {
+		"bufferutil": "^4.0.9",
+		"eventemitter3": "^5.0.1",
+		"events": "^3.3.0",
+		"ws": "^8.18.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.5",
+		"@rsbuild/plugin-node-polyfill": "^1.4.2",
+		"@rsbuild/plugin-type-check": "^1.3.0",
+		"@rsdoctor/rspack-plugin": "^1.3.9",
+		"@rslib/core": "^0.17.2",
+		"@types/node": "^24.10.1",
+		"@types/ws": "^8.18.1",
+		"@web/dev-server": "^0.4.6",
+		"cross-env": "^10.1.0",
+		"rimraf": "^6.1.0",
+		"typescript": "^5.9.3"
+	},
+	"packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+}
