@@ -29,7 +29,10 @@
 		"./umd": "./dist/umd/index.js"
 	},
 	"files": [
-		"dist", "package.json", "README.md", "LICENSE"
+		"dist",
+		"package.json",
+		"README.md",
+		"LICENSE"
 	],
 	"keywords": [
 		"iot",
@@ -41,7 +44,7 @@
 	"homepage": "https://github.com/mxmauro/iot-comm.js",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/mxmauro/iot-comm.js.git"
+		"url": "git+https://github.com/mxmauro/iot-comm.js.git"
 	},
 	"scripts": {
 		"build": "biome check && rimraf -I ./dist && cross-env NODE_ENV=production rslib build",
