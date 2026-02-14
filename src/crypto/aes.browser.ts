@@ -10,24 +10,6 @@ export const createAesCrypto = (): IAesCrypto => {
 // -----------------------------------------------------------------------------
 
 class BrowserAesCrypto implements IAesCrypto {
-	public async deriveKey(key: InputBuffer, salt: InputBuffer, info: InputBuffer, keyLen: number): Promise<ArrayBuffer> {
-		const baseKey = await crypto.subtle.importKey('raw', toArrayBufferView(key), 'HKDF', false, ['deriveBits']);
-
-		// Derive bits using HKDF
-		const derivedBits = await crypto.subtle.deriveBits(
-			{
-				name: 'HKDF',
-				hash: 'sha-256',
-				salt: toArrayBufferView(salt),
-				info: toArrayBufferView(info)
-			},
-			baseKey,
-			keyLen * 8 // length in bits
-		);
-
-		return derivedBits;
-	}
-
 	public async encrypt(plaintext: InputBuffer, key: InputBuffer, iv: InputBuffer, aad?: InputBuffer): Promise<ArrayBuffer> {
 		const cryptoKey = await crypto.subtle.importKey('raw', toArrayBufferView(key), { name: 'AES-GCM' }, false, ['encrypt']);
 

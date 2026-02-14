@@ -2,6 +2,7 @@ import EventEmitter from 'eventemitter3';
 import { createAesCrypto } from '@/crypto/aes';
 import { createECDHCrypto, createECDSACrypto } from '@/crypto/ecp';
 import { hash256 } from '@/crypto/hash';
+import { createHkdfCrypto } from '@/crypto/hkdf';
 import { randomize } from '@/crypto/random';
 import { createWebSocket } from '@/ws';
 import { ClientClosedError, CommandError } from './errors';
@@ -99,6 +100,7 @@ export class Client {
 	private closeCounter: number = 0;
 	private _mustChangeCredentials = false;
 	private aes = createAesCrypto();
+	private hkdf = createHkdfCrypto();
 	private clientAesKey = new ArrayBuffer();
 	private serverAesKey = new ArrayBuffer();
 	private clientBaseIV = new ArrayBuffer();
@@ -262,7 +264,7 @@ export class Client {
 			cookie
 		]);
 
-		const derivedKey = await this.aes.deriveKey(toDataView(sharedSecret), salt, info, 2 * AES_KEY_LEN + 2 * SESSION_IV_LEN);
+		const derivedKey = await this.hkdf.deriveKey(toDataView(sharedSecret), salt, info, 2 * AES_KEY_LEN + 2 * SESSION_IV_LEN);
 
 		const clientAesKey = derivedKey.slice(0, AES_KEY_LEN);
 		const serverAesKey = derivedKey.slice(AES_KEY_LEN, 2 * AES_KEY_LEN);

@@ -6,6 +6,7 @@
 			"@/crypto/aes": [ "./src/crypto/aes.node.ts" ],
 			"@/crypto/ecp": [ "./src/crypto/ecp.node.ts" ],
 			"@/crypto/hash": [ "./src/crypto/hash.node.ts" ],
+			"@/crypto/hkdf": [ "./src/crypto/hkdf.node.ts" ],
 			"@/crypto/random": [ "./src/crypto/random.node.ts" ]
 		}
 	}

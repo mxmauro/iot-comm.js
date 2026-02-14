@@ -6,6 +6,7 @@
 			"@/crypto/aes": [ "./src/crypto/aes.browser.ts" ],
 			"@/crypto/ecp": [ "./src/crypto/ecp.browser.ts" ],
 			"@/crypto/hash": [ "./src/crypto/hash.browser.ts" ],
+			"@/crypto/hkdf": [ "./src/crypto/hkdf.browser.ts" ],
 			"@/crypto/random": [ "./src/crypto/random.browser.ts" ]
 		}
 	}

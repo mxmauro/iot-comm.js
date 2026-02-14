@@ -1,11 +1,6 @@
-import { createCipheriv, createDecipheriv, hkdf } from 'node:crypto';
-import { promisify } from 'node:util';
+import { createCipheriv, createDecipheriv } from 'node:crypto';
 import { type InputBuffer, toArrayBuffer, toDataView } from '../utils/buffer';
 import type { IAesCrypto } from './aes.interface';
-
-// -----------------------------------------------------------------------------
-
-const hkdfAsync = promisify(hkdf);
 
 // -----------------------------------------------------------------------------
 
@@ -16,10 +11,6 @@ export const createAesCrypto = (): IAesCrypto => {
 // -----------------------------------------------------------------------------
 
 class NodeAesCrypto implements IAesCrypto {
-	public async deriveKey(key: InputBuffer, salt: InputBuffer, info: InputBuffer, keyLen: number): Promise<ArrayBuffer> {
-		return hkdfAsync('sha256', toDataView(key), toDataView(salt), toDataView(info), keyLen);
-	}
-
 	public async encrypt(plaintext: InputBuffer, key: InputBuffer, iv: InputBuffer, aad?: DataView): Promise<ArrayBuffer> {
 		return new Promise((resolve) => {
 			const cipher = createCipheriv('aes-256-gcm', toDataView(key), toDataView(iv), {
