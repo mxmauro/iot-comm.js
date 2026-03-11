@@ -10,8 +10,16 @@ export const createAesCrypto = (): IAesCrypto => {
 // -----------------------------------------------------------------------------
 
 class BrowserAesCrypto implements IAesCrypto {
-	public async encrypt(plaintext: InputBuffer, key: InputBuffer, iv: InputBuffer, aad?: InputBuffer): Promise<ArrayBuffer> {
-		const cryptoKey = await crypto.subtle.importKey('raw', toArrayBufferView(key), { name: 'AES-GCM' }, false, ['encrypt']);
+	private cryptoKey?: CryptoKey;
+
+	public async setKey(key: InputBuffer): Promise<void> {
+		this.cryptoKey = await crypto.subtle.importKey('raw', toArrayBufferView(key), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+	}
+
+	public async encrypt(plaintext: InputBuffer, iv: InputBuffer, aad?: InputBuffer): Promise<ArrayBuffer> {
+		if (!this.cryptoKey) {
+			throw new Error('Crypto key not set');
+		}
 
 		const encrypted = await crypto.subtle.encrypt(
 			{
@@ -20,15 +28,17 @@ class BrowserAesCrypto implements IAesCrypto {
 				...(aad && { additionalData: aad }),
 				tagLength: 16 * 8
 			},
-			cryptoKey,
+			this.cryptoKey,
 			toArrayBufferView(plaintext)
 		);
 
 		return encrypted;
 	}
 
-	public async decrypt(ciphertext: InputBuffer, key: InputBuffer, iv: InputBuffer, aad?: InputBuffer): Promise<ArrayBuffer> {
-		const cryptoKey = await crypto.subtle.importKey('raw', toArrayBufferView(key), { name: 'AES-GCM' }, false, ['decrypt']);
+	public async decrypt(ciphertext: InputBuffer, iv: InputBuffer, aad?: InputBuffer): Promise<ArrayBuffer> {
+		if (!this.cryptoKey) {
+			throw new Error('Crypto key not set');
+		}
 
 		const decrypted = await crypto.subtle.decrypt(
 			{
@@ -37,7 +47,7 @@ class BrowserAesCrypto implements IAesCrypto {
 				...(aad && { additionalData: aad }),
 				tagLength: 16 * 8
 			},
-			cryptoKey,
+			this.cryptoKey,
 			toArrayBufferView(ciphertext)
 		);
 

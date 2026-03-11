@@ -51,6 +51,33 @@ See the `examples/` directory for complete implementations:
 - `examples/browser/` - Web browser demo with user interface
 - `examples/nodejs/` - Node.js console and key generation examples
 
+## Quick Start
+
+### Generate ECDSA key pair
+
+```ts
+import { Client, toB64 } from '@mxmauro/iot-comm.js';
+
+const { privateKey, publicKey } = await Client.generateECDSAKeyPair();
+
+console.log('Private key:', toB64(privateKey));
+console.log('Public key:', toB64(publicKey));
+```
+
+### Connect to a device
+
+```ts
+import { Client } from '@mxmauro/iot-comm.js';
+
+const client = new Client();
+
+await client.connect({
+	hostname: '192.168.1.25:80',
+	username: 'admin',
+	privateKey: '<base64-private-key>'
+});
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.

@@ -15,7 +15,6 @@ import { CLOSE_INTERNAL_ERROR, CLOSE_INVALID_PAYLOAD, CLOSE_NORMAL, CLOSED, OPEN
 
 export { hash256 } from '@/crypto/hash';
 export { randomize } from '@/crypto/random';
-export { generateKeyPair } from './utils';
 export { fromB64, toB64 } from './utils/base64';
 
 // -----------------------------------------------------------------------------
@@ -51,6 +50,7 @@ const NONCE_SIZE = 16;
 const P256_PUBLIC_KEY_SIZE = 65;
 const AES_KEY_LEN = 32;
 const SESSION_IV_LEN = 12;
+const TAG_LEN = 16;
 
 // -----------------------------------------------------------------------------
 
@@ -92,6 +92,11 @@ export type ClientMessage = {
 	data: ArrayBuffer;
 };
 
+export type ECDSAKeyPair = {
+	publicKey: ArrayBuffer;
+	privateKey: ArrayBuffer;
+};
+
 // -----------------------------------------------------------------------------
 
 export class Client {
@@ -99,10 +104,11 @@ export class Client {
 	private ws: IWebSocket | null = null;
 	private closeCounter: number = 0;
 	private _mustChangeCredentials = false;
-	private aes = createAesCrypto();
+	private clientAes = createAesCrypto();
+	private serverAes = createAesCrypto();
 	private hkdf = createHkdfCrypto();
-	private clientAesKey = new ArrayBuffer();
-	private serverAesKey = new ArrayBuffer();
+	//private clientAesKey = new ArrayBuffer();
+	//private serverAesKey = new ArrayBuffer();
 	private clientBaseIV = new ArrayBuffer();
 	private serverBaseIV = new ArrayBuffer();
 	private wsNonce = new ArrayBuffer();
@@ -110,6 +116,16 @@ export class Client {
 	private nextTxCounter: number = 0;
 	private waitingReplyMap: Map<number, WaitingReplyElement> = new Map();
 	private waitingCloseQueue: WaitingCloseElement[] = [];
+
+	public static async generateECDSAKeyPair(): Promise<ECDSAKeyPair> {
+		const ecdsa = createECDSACrypto();
+		await ecdsa.generateKeys();
+
+		const publicKey = await ecdsa.saveRawPublicKey();
+		const privateKey = await ecdsa.saveRawPrivateKey();
+
+		return { publicKey, privateKey };
+	}
 
 	public async connect(opts: ConnectOptions): Promise<void> {
 		const ecdsa = createECDSACrypto();
@@ -264,6 +280,7 @@ export class Client {
 			cookie
 		]);
 
+		// Derive key
 		const derivedKey = await this.hkdf.deriveKey(toDataView(sharedSecret), salt, info, 2 * AES_KEY_LEN + 2 * SESSION_IV_LEN);
 
 		const clientAesKey = derivedKey.slice(0, AES_KEY_LEN);
@@ -290,12 +307,14 @@ export class Client {
 			timeoutMs: 10000
 		});
 
-		// Init internals
+		// Init AES ciphers
+		await this.clientAes.setKey(clientAesKey);
+		await this.serverAes.setKey(serverAesKey);
+
+		// Init other internals
 		this.waitingCloseQueue = [];
 		this.waitingReplyMap = new Map();
 		this._mustChangeCredentials = mustChangeCredentials;
-		this.clientAesKey = clientAesKey;
-		this.serverAesKey = serverAesKey;
 		this.clientBaseIV = clientBaseIV;
 		this.serverBaseIV = serverBaseIV;
 		this.wsNonce = wsNonce;
@@ -320,11 +339,26 @@ export class Client {
 	}
 
 	public async sendCommandAndWaitReply(cmd: number, data: InputBuffer | InputBuffer[]): Promise<ArrayBuffer> {
-		const txCounter = await this.encryptAndSend(cmd, data);
+		let resolve!: (v: ArrayBuffer) => void;
+		let reject!: (e: unknown) => void;
 
-		return new Promise<ArrayBuffer>((resolve, reject) => {
-			this.waitingReplyMap.set(txCounter, { resolve, reject });
+		const txCounter = this.nextTxCounter;
+
+		const p = new Promise<ArrayBuffer>((_resolve, _reject) => {
+			resolve = _resolve;
+			reject = _reject;
 		});
+
+		this.waitingReplyMap.set(txCounter, { resolve, reject });
+
+		try {
+			await this.encryptAndSend(cmd, data);
+		} catch (err) {
+			this.waitingReplyMap.delete(txCounter);
+			throw err;
+		}
+
+		return p;
 	}
 
 	public async createUserCommand(name: string, publicKey: InputBuffer): Promise<void> {
@@ -519,18 +553,20 @@ export class Client {
 		return this;
 	}
 
-	private async encryptAndSend(cmd: number, data: InputBuffer | InputBuffer[]): Promise<number> {
+	private async encryptAndSend(cmd: number, data: InputBuffer | InputBuffer[]): Promise<void> {
 		if (!this.ws || this.ws.readyState !== OPEN) {
 			throw new Error('WebSocket is not connected');
 		}
 
 		data = toDataView(data, 'Data');
-		const txCounter = this.nextTxCounter;
 
 		// Check data size
 		if (data.byteLength > MAX_MSG_SIZE) {
 			throw new Error(`Data too long (max ${MAX_MSG_SIZE} bytes)`);
 		}
+
+		// Get TX counter
+		const txCounter = this.nextTxCounter;
 
 		// Header { v(1) | cmd(2) | filler(1) | replyCounter(4) | counter(4) | filler(4) }
 		const header = Buffer.alloc(PACKET_HEADER_LEN);
@@ -548,16 +584,13 @@ export class Client {
 		}
 
 		// Encrypt data
-		const encrypted = await this.aes.encrypt(data, this.clientAesKey, iv);
+		const encrypted = await this.clientAes.encrypt(data, iv);
 
 		// Send it
 		this.ws.send(Buffer.concat([header, new Uint8Array(encrypted)]));
 
 		// Increment write counter
 		this.nextTxCounter += 1;
-
-		// Done
-		return txCounter;
 	}
 
 	private onMessage(data: string | ArrayBuffer): void {
@@ -578,7 +611,7 @@ export class Client {
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: packet too short');
 			return;
 		}
-		if (data.byteLength > PACKET_HEADER_LEN + MAX_MSG_SIZE + 32) {
+		if (data.byteLength > PACKET_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN) {
 			// Packet too short to contain header + tag
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: packet too long');
 			return;
@@ -613,8 +646,8 @@ export class Client {
 		// Try to decrypt
 		const ciphertextView = new DataView(data, PACKET_HEADER_LEN, data.byteLength - PACKET_HEADER_LEN);
 		const thisCloseCounter = this.closeCounter;
-		this.aes
-			.decrypt(ciphertextView, this.serverAesKey, iv)
+		this.serverAes
+			.decrypt(ciphertextView, iv)
 			.then((plaintext) => {
 				if (thisCloseCounter === this.closeCounter) {
 					// Process message

@@ -21,10 +21,10 @@ export default defineConfig({
 				distPath: {
 					root: "./dist/node/"
 				},
-				minify: true,
+				minify: false,
 				sourceMap: true,
 				filename: {
-					js: '[name].min.js'
+					js: '[name].js'
 				}
 			}
 		},
@@ -42,10 +42,10 @@ export default defineConfig({
 				distPath: {
 					root: "./dist/node/"
 				},
-				minify: true,
+				minify: false,
 				sourceMap: true,
 				filename: {
-					js: '[name].min.js'
+					js: '[name].cjs'
 				}
 			}
 		},

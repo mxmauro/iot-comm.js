@@ -1,9 +1,9 @@
-import { generateKeyPair } from '../../../dist/node/utils.js';
+import { Client } from '../../../dist/node/index.js';
 
 // -----------------------------------------------------------------------------
 
 const main = async () => {
-	const keypair = await generateKeyPair();
+	const keypair = await Client.generateECDSAKeyPair();
 
 	const privateKeyB64 = Buffer.from(keypair.privateKey).toString('base64');
 	const publicKeyB64 = Buffer.from(keypair.publicKey).toString('base64');
