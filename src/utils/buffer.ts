@@ -2,23 +2,35 @@ export type InputBuffer = DataView | ArrayBuffer | Buffer | Uint8Array;
 
 // -----------------------------------------------------------------------------
 
+const isNodeBuffer = (data: unknown): data is Buffer => {
+	return typeof Buffer !== 'undefined' && Buffer.isBuffer(data);
+};
+
+const isArrayBuffer = (data: unknown): data is ArrayBuffer => {
+	return Object.prototype.toString.call(data) === '[object ArrayBuffer]';
+};
+
+const isDataView = (data: unknown): data is DataView => {
+	return ArrayBuffer.isView(data) && Object.prototype.toString.call(data) === '[object DataView]';
+};
+
+const isUint8Array = (data: unknown): data is Uint8Array => {
+	return ArrayBuffer.isView(data) && Object.prototype.toString.call(data) === '[object Uint8Array]';
+};
+
 export const toDataView = (data: InputBuffer | InputBuffer[], varName?: string): DataView => {
 	if (typeof data !== 'undefined') {
 		if (Array.isArray(data)) {
 			return new DataView(toArrayBuffer(data));
 		}
-		if (data instanceof DataView) {
+		if (isDataView(data)) {
 			return data;
 		}
-		if (data instanceof Uint8Array) {
+		if (isNodeBuffer(data) || isUint8Array(data)) {
 			const buf = data as Uint8Array;
 			return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
 		}
-		if (Buffer.isBuffer(data)) {
-			const buf = data as Buffer;
-			return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-		}
-		if (data instanceof ArrayBuffer) {
+		if (isArrayBuffer(data)) {
 			return new DataView(data);
 		}
 	}
@@ -32,17 +44,14 @@ export const toArrayBufferView = (src: InputBuffer | InputBuffer[]): ArrayBuffer
 	if (Array.isArray(src)) {
 		return new Uint8Array(toArrayBuffer(src));
 	}
-	if (src instanceof Uint8Array) {
+	if (isNodeBuffer(src) || isUint8Array(src)) {
 		return new Uint8Array(src);
 	}
-	if (src instanceof ArrayBuffer) {
+	if (isArrayBuffer(src)) {
 		return new Uint8Array(src);
 	}
-	if (src instanceof Buffer) {
-		return new Uint8Array(src);
-	}
-	if (src instanceof DataView) {
-		return new Uint8Array(Buffer.from(src.buffer, src.byteOffset, src.byteLength));
+	if (isDataView(src)) {
+		return new Uint8Array(toArrayBuffer(src));
 	}
 	throw new TypeError('Unsupported input type');
 };
@@ -61,14 +70,12 @@ export const toArrayBuffer = (src: InputBuffer | InputBuffer[]): ArrayBuffer => 
 	let ofs = 0;
 
 	src.forEach((buf) => {
-		if (buf instanceof Uint8Array) {
+		if (isNodeBuffer(buf) || isUint8Array(buf)) {
 			destView.set(buf, ofs);
-		} else if (buf instanceof ArrayBuffer) {
+		} else if (isArrayBuffer(buf)) {
 			destView.set(new Uint8Array(buf), ofs);
-		} else if (buf instanceof Buffer) {
-			destView.set(new Uint8Array(buf), ofs);
-		} else if (buf instanceof DataView) {
-			destView.set(Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength), ofs);
+		} else if (isDataView(buf)) {
+			destView.set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), ofs);
 		} else {
 			throw new TypeError('Unsupported input type');
 		}

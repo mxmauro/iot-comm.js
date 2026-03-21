@@ -140,15 +140,15 @@ export class Client {
 		if (typeof opts.username !== 'string' || opts.username.length < 1 || opts.username.length > 255) {
 			throw new Error('Invalid user name');
 		}
-		try {
-			if (typeof opts.privateKey === 'string') {
-				await ecdsa.loadRawPrivateKey(toDataView(fromB64(opts.privateKey)));
-			} else {
-				await ecdsa.loadRawPrivateKey(toDataView(opts.privateKey));
-			}
-		} catch (_err) {
-			throw new Error('Invalid private key');
+		// try {
+		if (typeof opts.privateKey === 'string') {
+			await ecdsa.loadRawPrivateKey(toDataView(fromB64(opts.privateKey)));
+		} else {
+			await ecdsa.loadRawPrivateKey(toDataView(opts.privateKey));
 		}
+		// } catch (_err) {
+		// 	throw new Error('Invalid private key');
+		// }
 
 		const baseUrl = `http://${opts.hostname}/`;
 

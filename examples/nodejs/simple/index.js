@@ -3,12 +3,28 @@ import { ask, askHidden } from './console.js';
 
 // -----------------------------------------------------------------------------
 
+const getArgValue = (name) => {
+	const prefix = `${name}=`;
+	for (let i = 0; i < process.argv.length; i++) {
+		const arg = process.argv[i];
+		if (arg === name) {
+			return i < process.argv.length - 1 ? process.argv[i + 1] : '';
+		}
+		if (arg.startsWith(prefix)) {
+			return arg.slice(prefix.length);
+		}
+	}
+	return '';
+};
+
+// -----------------------------------------------------------------------------
+
 const main = async () => {
-	const hostname = await ask('Hostname');
+	const hostname = getArgValue('--host') || (await ask('Hostname'));
 	if (!hostname) {
 		return;
 	}
-	const username = await ask('User name');
+	const username = getArgValue('--username') || (await ask('User name'));
 	if (!username) {
 		return;
 	}
@@ -22,7 +38,7 @@ const main = async () => {
 	await client.connect({
 		hostname,
 		username,
-		privKey
+		privateKey: privKey
 	});
 
 	await client.close();

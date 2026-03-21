@@ -28,7 +28,7 @@ export const askHidden = async (prompt) => {
 		if (isTTY) {
 			const password = await new Promise((resolve, reject) => {
 				// TTY mode - hide input
-				let password = '';
+				const passwordChars = [];
 				let muted = false;
 
 				const originalWrite = output.write.bind(output);
@@ -44,37 +44,39 @@ export const askHidden = async (prompt) => {
 					return true;
 				};
 
-				const onData = (char) => {
-					switch (char) {
-						case '\n':
-						case '\r':
-						case '\u0004': // Ctrl-D
-							cleanup();
-							originalWrite('\n');
-							resolve(password);
-							break;
+				const onData = (chunk) => {
+					for (const ch of chunk) {
+						switch (ch) {
+							case '\n':
+							case '\r':
+							case '\u0004': // Ctrl-D
+								cleanup();
+								originalWrite('\n');
+								resolve(passwordChars.join(''));
+								return;
 
-						case '\u0003': // Ctrl-C
-							cleanup();
-							originalWrite('\n');
-							reject(new Error('Cancelled'));
-							break;
+							case '\u0003': // Ctrl-C
+								cleanup();
+								originalWrite('\n');
+								reject(new Error('Cancelled'));
+								return;
 
-						case '\u007f': // Backspace (Unix)
-						case '\b': // Backspace (Windows)
-							if (password.length > 0) {
-								password = password.slice(0, -1);
-								originalWrite('\b \b');
-							}
-							break;
+							case '\u007f': // Backspace (Unix)
+							case '\b': // Backspace (Windows)
+								if (passwordChars.length > 0) {
+									passwordChars.pop();
+									originalWrite('\b \b');
+								}
+								break;
 
-						default:
-							// Ignore control characters
-							if (char.charCodeAt(0) >= 32) {
-								password += char;
-								originalWrite('*');
-							}
-							break;
+							default:
+								// Raw mode may deliver pasted text as a single chunk.
+								if (ch >= ' ') {
+									passwordChars.push(ch);
+									originalWrite('*');
+								}
+								break;
+						}
 					}
 				};
 
