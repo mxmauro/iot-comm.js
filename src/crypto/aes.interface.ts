@@ -2,6 +2,7 @@ import type { InputBuffer } from '../utils/buffer';
 
 // -----------------------------------------------------------------------------
 
+// Defines the AES operations required by the protocol implementation.
 export interface IAesCrypto {
 	setKey(key: InputBuffer): Promise<void>;
 

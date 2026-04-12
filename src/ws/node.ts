@@ -11,10 +11,12 @@ type SocketError = {
 
 // -----------------------------------------------------------------------------
 
+// Creates the Node.js WebSocket transport implementation.
 export const createWebSocket = (): IWebSocket => {
 	return new NodeWebSocket();
 };
 
+// Implements the WebSocket transport using the Node.js ws package.
 export class NodeWebSocket implements IWebSocket {
 	private emitter = new EventEmitter<WebSocketEvents>();
 	private ws: WebSocket | null = null;

@@ -1,3 +1,4 @@
+// Validates a hostname string with or without an explicit port.
 export const isValidHostname = (str: string): boolean => {
 	if (typeof str !== 'string' || str.length < 1) {
 		return false;
@@ -8,6 +9,7 @@ export const isValidHostname = (str: string): boolean => {
 	return isValidHostnameAndPort(str);
 };
 
+// Validates a hostname string that may include a port number.
 export const isValidHostnameAndPort = (str: string): boolean => {
 	if (typeof str !== 'string' || str.length < 1) {
 		return false;

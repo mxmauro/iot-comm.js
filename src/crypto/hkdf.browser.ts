@@ -3,6 +3,7 @@ import type { IHkdfCrypto } from './hkdf.interface';
 
 // -----------------------------------------------------------------------------
 
+// Creates the browser HKDF crypto implementation.
 export const createHkdfCrypto = (): IHkdfCrypto => {
 	return new BrowserHkdfCrypto();
 };

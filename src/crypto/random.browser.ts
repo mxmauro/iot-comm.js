@@ -1,3 +1,4 @@
+// Generates cryptographically secure random bytes in browser environments.
 export const randomize = (len: number): ArrayBuffer => {
 	const buf = new ArrayBuffer(len);
 	crypto.getRandomValues(new Uint8Array(buf, 0, len));

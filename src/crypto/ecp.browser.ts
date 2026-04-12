@@ -4,10 +4,12 @@ import type { IECDHCrypto, IECDSACrypto } from './ecp.interface';
 
 // -----------------------------------------------------------------------------
 
+// Creates the browser ECDSA crypto implementation.
 export const createECDSACrypto = (): IECDSACrypto => {
 	return new BrowserECDSACrypto();
 };
 
+// Creates the browser ECDH crypto implementation.
 export const createECDHCrypto = (): IECDHCrypto => {
 	return new BrowserECDHCrypto();
 };

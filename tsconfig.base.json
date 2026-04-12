@@ -17,6 +17,7 @@
 		"resolveJsonModule": true,
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
+		"rootDir": "./src",
 
 		/* type checking */
 		"strict": true,

@@ -20,10 +20,12 @@ const diffieHellmanAsync = promisify(diffieHellman);
 
 // -----------------------------------------------------------------------------
 
+// Creates the Node.js ECDSA crypto implementation.
 export const createECDSACrypto = (): IECDSACrypto => {
 	return new NodeECDSACrypto();
 };
 
+// Creates the Node.js ECDH crypto implementation.
 export const createECDHCrypto = (): IECDHCrypto => {
 	return new NodeECDHCrypto();
 };

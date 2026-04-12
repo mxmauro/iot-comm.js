@@ -16,6 +16,7 @@ export const CLOSE_MANDATORY_EXT = 1010; // Missing required extension
 export const CLOSE_INTERNAL_ERROR = 1011; // Internal server error
 export const CLOSE_TLS_HANDSHAKE_FAIL = 1015; // TLS handshake failure (MUST NOT be set in a close frame)
 
+// Defines the transport contract required by the client WebSocket layer.
 export interface IWebSocket {
 	get readyState(): number;
 
@@ -28,23 +29,27 @@ export interface IWebSocket {
 	once<K extends keyof WebSocketEvents>(event: K, handler: WebSocketEvents[K]): this;
 }
 
+// Defines the options needed to open a WebSocket transport connection.
 export interface ConnectOptions {
 	url: string;
 	protocols?: string | string[];
 	timeoutMs?: number;
 }
 
+// Describes the events emitted by a WebSocket transport implementation.
 export type WebSocketEvents = {
 	message: (data: string | ArrayBuffer) => void;
 	close: (event: CloseEvent) => void;
 	error: (error: Error) => void;
 };
 
+// Represents the normalized details of a WebSocket close event.
 export type CloseEvent = {
 	code: number;
 	reason: string;
 };
 
+// Reports that a WebSocket connection attempt exceeded its timeout.
 export class ConnectTimeoutError extends Error {
 	public readonly timeoutMs: number;
 
@@ -55,6 +60,7 @@ export class ConnectTimeoutError extends Error {
 	}
 }
 
+// Reports that a WebSocket closed before the connection handshake completed.
 export class ConnectCloseError extends Error {
 	public readonly code: number;
 	public readonly reason: string;

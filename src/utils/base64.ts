@@ -4,6 +4,7 @@ const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
 
 // -----------------------------------------------------------------------------
 
+// Encodes binary data as Base64 or Base64URL text.
 export const toB64 = (buffer: InputBuffer, url?: boolean): string => {
 	let base64: string;
 	let binary = '';
@@ -25,6 +26,7 @@ export const toB64 = (buffer: InputBuffer, url?: boolean): string => {
 	return base64;
 };
 
+// Decodes Base64 or Base64URL text into binary data.
 export const fromB64 = (base64: string, url?: boolean): ArrayBuffer => {
 	let binary: string;
 

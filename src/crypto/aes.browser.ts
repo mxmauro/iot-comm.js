@@ -3,6 +3,7 @@ import type { IAesCrypto } from './aes.interface';
 
 // -----------------------------------------------------------------------------
 
+// Creates the browser AES crypto implementation.
 export const createAesCrypto = (): IAesCrypto => {
 	return new BrowserAesCrypto();
 };

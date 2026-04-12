@@ -4,12 +4,14 @@ import { CLOSE_ABNORMAL, CLOSE_NORMAL, CLOSED, CLOSING, CONNECTING, ConnectClose
 
 // -----------------------------------------------------------------------------
 
+// Creates the browser WebSocket transport implementation.
 export const createWebSocket = (): IWebSocket => {
 	return new BrowserWebSocket();
 };
 
 // -----------------------------------------------------------------------------
 
+// Implements the WebSocket transport using the browser WebSocket API.
 export class BrowserWebSocket implements IWebSocket {
 	private emitter = new EventEmitter<WebSocketEvents>();
 	private ws: WebSocket | null = null;
@@ -87,7 +89,14 @@ export class BrowserWebSocket implements IWebSocket {
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
 			throw new Error('WebSocket is not open');
 		}
-		this.ws.send(data);
+		if (typeof data === 'string' || data instanceof ArrayBuffer) {
+			this.ws.send(data);
+			return;
+		}
+
+		const payload = new Uint8Array(data.byteLength);
+		payload.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+		this.ws.send(payload);
 	}
 
 	public close(code?: number, reason?: string): void {

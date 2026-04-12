@@ -3,6 +3,7 @@ import { type InputBuffer, toDataView } from '../utils/buffer';
 
 // -----------------------------------------------------------------------------
 
+// Computes a SHA-256 digest in Node.js environments.
 export const hash256 = async (data: InputBuffer[]): Promise<ArrayBuffer> => {
 	return new Promise((resolve) => {
 		const h = createHash('sha256');

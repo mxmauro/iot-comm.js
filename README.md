@@ -78,6 +78,40 @@ await client.connect({
 });
 ```
 
+### Upload firmware with OTA
+
+```ts
+await client.uploadFirmware({
+	image: firmwareBlob,
+	onProgress: ({ sentBytes, totalBytes }) => {
+		console.log(`Uploaded ${sentBytes}/${totalBytes}`);
+	}
+});
+```
+
+For browser use, `Blob` is the simplest input type. For Node.js or advanced cases, you can also pass an `ArrayBuffer`, `Uint8Array`, `Buffer`, or a sync/async iterable of chunks. When the image source is iterable, you must also provide `imageSize`.
+
+```ts
+await client.uploadFirmware({
+	image: async function* () {
+		yield chunk1;
+		yield chunk2;
+		yield chunk3;
+	}(),
+	imageSize: totalFirmwareSize,
+	chunkSize: 1024,
+	signal: abortController.signal
+});
+```
+
+The lower-level command methods are also available when you need manual control over the OTA session:
+
+```ts
+await client.otaBeginCommand(firmwareSize);
+await client.otaWriteCommand(chunk);
+await client.otaCancelCommand();
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.

@@ -1,3 +1,4 @@
+// Lists the binary input shapes accepted by the library helpers and commands.
 export type InputBuffer = DataView | ArrayBuffer | Buffer | Uint8Array;
 
 // -----------------------------------------------------------------------------
@@ -18,6 +19,7 @@ const isUint8Array = (data: unknown): data is Uint8Array => {
 	return ArrayBuffer.isView(data) && Object.prototype.toString.call(data) === '[object Uint8Array]';
 };
 
+// Normalizes supported binary inputs into a DataView.
 export const toDataView = (data: InputBuffer | InputBuffer[], varName?: string): DataView => {
 	if (typeof data !== 'undefined') {
 		if (Array.isArray(data)) {
@@ -40,6 +42,7 @@ export const toDataView = (data: InputBuffer | InputBuffer[], varName?: string):
 	throw new TypeError('Unsupported input type');
 };
 
+// Normalizes supported binary inputs into an ArrayBufferView.
 export const toArrayBufferView = (src: InputBuffer | InputBuffer[]): ArrayBufferView<ArrayBuffer> => {
 	if (Array.isArray(src)) {
 		return new Uint8Array(toArrayBuffer(src));
@@ -56,6 +59,7 @@ export const toArrayBufferView = (src: InputBuffer | InputBuffer[]): ArrayBuffer
 	throw new TypeError('Unsupported input type');
 };
 
+// Copies supported binary inputs into a single ArrayBuffer.
 export const toArrayBuffer = (src: InputBuffer | InputBuffer[]): ArrayBuffer => {
 	if (!Array.isArray(src)) {
 		src = [src];
@@ -85,6 +89,20 @@ export const toArrayBuffer = (src: InputBuffer | InputBuffer[]): ArrayBuffer => 
 	return dest;
 };
 
+// Returns the byte length of a supported binary input.
+export const getInputBufferSize = (data: InputBuffer, varName?: string): number => {
+	return toDataView(data, varName).byteLength;
+};
+
+// Splits a binary input into sequential chunks of the requested size.
+export async function* chunkInputBuffer(data: InputBuffer, chunkSize: number): AsyncGenerator<Uint8Array> {
+	const view = new Uint8Array(toArrayBuffer(data));
+	for (let offset = 0; offset < view.byteLength; offset += chunkSize) {
+		yield view.slice(offset, Math.min(offset + chunkSize, view.byteLength));
+	}
+}
+
+// Encodes a UTF-8 string with a trailing NUL byte.
 export const stringToNulTerminatedBuffer = (s: string): Buffer => {
 	return Buffer.concat([Buffer.from(`${s}`, 'utf8'), Buffer.from([0])]);
 };

@@ -2,6 +2,7 @@ import type { CloseEvent } from './ws/interface';
 
 // -----------------------------------------------------------------------------
 
+// Reports that an operation failed because the client connection closed.
 export class ClientClosedError extends Error {
 	public readonly code: number;
 	public readonly reason: string;
@@ -26,6 +27,7 @@ export class ClientClosedError extends Error {
 	}
 }
 
+// Reports a non-zero error code returned by a device command reply.
 export class CommandError extends Error {
 	public readonly code: number;
 

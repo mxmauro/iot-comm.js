@@ -8,7 +8,10 @@ import { createWebSocket } from '@/ws';
 import { ClientClosedError, CommandError } from './errors';
 import { fromB64, toB64 } from './utils/base64';
 import { type InputBuffer, toArrayBuffer, toDataView } from './utils/buffer';
+import type { OtaUploadOptions } from './utils/ota';
+import { iterateOtaChunks, resolveOtaImageSize, validateOtaChunkSize, validateOtaImageSize } from './utils/ota';
 import type { PromiseResolver } from './utils/promise';
+import { throwIfAborted } from './utils/signal';
 import { isValidHostnameAndPort } from './utils/validation';
 import type { CloseEvent, IWebSocket } from './ws/interface';
 import { CLOSE_INTERNAL_ERROR, CLOSE_INVALID_PAYLOAD, CLOSE_NORMAL, CLOSED, OPEN } from './ws/interface';
@@ -16,6 +19,8 @@ import { CLOSE_INTERNAL_ERROR, CLOSE_INVALID_PAYLOAD, CLOSE_NORMAL, CLOSED, OPEN
 export { hash256 } from '@/crypto/hash';
 export { randomize } from '@/crypto/random';
 export { fromB64, toB64 } from './utils/base64';
+// Re-exports the OTA-related public data types used by the client API.
+export type { OtaImageSource, OtaProgress, OtaUploadOptions } from './utils/ota';
 
 // -----------------------------------------------------------------------------
 
@@ -38,6 +43,18 @@ const CMD_CHANGE_USER_CREDENTIALS = 0x7FF4;
 //     new public key: raw 65-byte uncompressed ECDSA public key
 //
 // biome-ignore format: preserve uppercase hex
+const CMD_OTA_BEGIN = 0x7FF5;
+//     image size: 4-byte big-endian image size in bytes
+//
+// biome-ignore format: preserve uppercase hex
+const CMD_OTA_WRITE = 0x7FF6;
+//     chunk: remaining packet payload bytes
+//
+// biome-ignore format: preserve uppercase hex
+const CMD_OTA_CANCEL = 0x7FF7;
+//     no payload
+//
+// biome-ignore format: preserve uppercase hex
 const CMD_SET_MDNS_HOSTNAME = 0x7000;
 //       hostname: NUL-terminated string
 
@@ -51,9 +68,12 @@ const P256_PUBLIC_KEY_SIZE = 65;
 const AES_KEY_LEN = 32;
 const SESSION_IV_LEN = 12;
 const TAG_LEN = 16;
+const OTA_IMAGE_SIZE_LEN = 4;
+const DEFAULT_OTA_CHUNK_SIZE = MAX_MSG_SIZE;
 
 // -----------------------------------------------------------------------------
 
+// Describes the events emitted by a connected client instance.
 export type ClientEvents = {
 	message: (data: ClientMessage) => void;
 	close: (event: CloseEvent) => void;
@@ -81,17 +101,20 @@ export const CloseReasonCredentialsChangeMandatory = 4002;
 
 // -----------------------------------------------------------------------------
 
+// Defines the parameters required to connect to a device.
 export type ConnectOptions = {
 	hostname: string;
 	username: string;
 	privateKey: InputBuffer | string;
 };
 
+// Represents an inbound command message emitted by the client.
 export type ClientMessage = {
 	cmd: number;
 	data: ArrayBuffer;
 };
 
+// Holds an ECDSA key pair encoded in raw binary form.
 export type ECDSAKeyPair = {
 	publicKey: ArrayBuffer;
 	privateKey: ArrayBuffer;
@@ -99,6 +122,8 @@ export type ECDSAKeyPair = {
 
 // -----------------------------------------------------------------------------
 
+// Provides the high-level API for authenticating and communicating with a
+// Iot-Comm managed device.
 export class Client {
 	private emitter = new EventEmitter<ClientEvents>();
 	private ws: IWebSocket | null = null;
@@ -107,8 +132,6 @@ export class Client {
 	private clientAes = createAesCrypto();
 	private serverAes = createAesCrypto();
 	private hkdf = createHkdfCrypto();
-	//private clientAesKey = new ArrayBuffer();
-	//private serverAesKey = new ArrayBuffer();
 	private clientBaseIV = new ArrayBuffer();
 	private serverBaseIV = new ArrayBuffer();
 	private wsNonce = new ArrayBuffer();
@@ -117,6 +140,7 @@ export class Client {
 	private waitingReplyMap: Map<number, WaitingReplyElement> = new Map();
 	private waitingCloseQueue: WaitingCloseElement[] = [];
 
+	// Generates a fresh ECDSA key pair suitable for device authentication.
 	public static async generateECDSAKeyPair(): Promise<ECDSAKeyPair> {
 		const ecdsa = createECDSACrypto();
 		await ecdsa.generateKeys();
@@ -127,6 +151,7 @@ export class Client {
 		return { publicKey, privateKey };
 	}
 
+	// Establishes an authenticated encrypted session with the target device.
 	public async connect(opts: ConnectOptions): Promise<void> {
 		const ecdsa = createECDSACrypto();
 		const ecdh = createECDHCrypto();
@@ -140,15 +165,11 @@ export class Client {
 		if (typeof opts.username !== 'string' || opts.username.length < 1 || opts.username.length > 255) {
 			throw new Error('Invalid user name');
 		}
-		// try {
 		if (typeof opts.privateKey === 'string') {
 			await ecdsa.loadRawPrivateKey(toDataView(fromB64(opts.privateKey)));
 		} else {
 			await ecdsa.loadRawPrivateKey(toDataView(opts.privateKey));
 		}
-		// } catch (_err) {
-		// 	throw new Error('Invalid private key');
-		// }
 
 		const baseUrl = `http://${opts.hostname}/`;
 
@@ -326,18 +347,22 @@ export class Client {
 		this.ws.on('close', (event) => this.onClose(event));
 	}
 
+	// Reports whether the client currently has an open WebSocket session.
 	public get isConnected(): boolean {
 		return !!(this.ws && this.ws.readyState === OPEN);
 	}
 
+	// Indicates whether the device requires the user credentials to be changed.
 	public get mustChangeCredentials(): boolean {
 		return this._mustChangeCredentials;
 	}
 
+	// Sends a command without waiting for a reply payload.
 	public async sendCommand(cmd: number, data: InputBuffer | InputBuffer[]): Promise<void> {
 		await this.encryptAndSend(cmd, data);
 	}
 
+	// Sends a command and resolves with the raw reply payload.
 	public async sendCommandAndWaitReply(cmd: number, data: InputBuffer | InputBuffer[]): Promise<ArrayBuffer> {
 		let resolve!: (v: ArrayBuffer) => void;
 		let reject!: (e: unknown) => void;
@@ -361,6 +386,7 @@ export class Client {
 		return p;
 	}
 
+	// Creates a new device user with the provided public key.
 	public async createUserCommand(name: string, publicKey: InputBuffer): Promise<void> {
 		if (typeof name !== 'string' || name.length < 1 || name.length > 255) {
 			throw new Error('Invalid user name');
@@ -378,7 +404,7 @@ export class Client {
 		}
 
 		// Execute command
-		// biome-ignore format: preserve uppercase hex
+		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_CREATE_USER,
 			[
@@ -392,13 +418,14 @@ export class Client {
 		this.raiseReplyErrorIfAny(reply);
 	}
 
+	// Deletes an existing device user.
 	public async deleteUserCommand(name: string): Promise<void> {
 		if (typeof name !== 'string' || name.length < 1 || name.length > 255) {
 			throw new Error('Invalid user name');
 		}
 
 		// Execute command
-		// biome-ignore format: preserve uppercase hex
+		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_DELETE_USER,
 			[
@@ -411,6 +438,7 @@ export class Client {
 		this.raiseReplyErrorIfAny(reply);
 	}
 
+	// Replaces another user's credentials with a new public key.
 	public async resetUserCredentialsCommand(name: string, publicKey: InputBuffer): Promise<void> {
 		if (typeof name !== 'string' || name.length < 1 || name.length > 255) {
 			throw new Error('Invalid user name');
@@ -428,7 +456,7 @@ export class Client {
 		}
 
 		// Execute command
-		// biome-ignore format: preserve uppercase hex
+		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_RESET_USER_CREDENTIALS,
 			[
@@ -442,6 +470,7 @@ export class Client {
 		this.raiseReplyErrorIfAny(reply);
 	}
 
+	// Changes the current user's credentials and clears the mandatory-change flag on success.
 	public async changeUserCredentialsCommand(oldPrivateKey: InputBuffer | string, publicKey: InputBuffer | string): Promise<void> {
 		const ecdsa = createECDSACrypto();
 
@@ -480,7 +509,7 @@ export class Client {
 		const signature = await ecdsa.sign(t);
 
 		// Execute command
-		// biome-ignore format: preserve uppercase hex
+		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_CHANGE_USER_CREDENTIALS,
 			[
@@ -496,13 +525,107 @@ export class Client {
 		this._mustChangeCredentials = false;
 	}
 
+	// Starts an OTA session for a firmware image of the specified size.
+	public async otaBeginCommand(imageSize: number): Promise<void> {
+		validateOtaImageSize(imageSize);
+
+		const payload = Buffer.alloc(OTA_IMAGE_SIZE_LEN);
+		payload.writeUInt32BE(imageSize, 0);
+
+		// Execute command
+		const reply = await this.sendCommandAndWaitReply(CMD_OTA_BEGIN, payload);
+
+		// Wait for server reply
+		this.raiseReplyErrorIfAny(reply);
+	}
+
+	// Uploads a single OTA firmware chunk to the active OTA session.
+	public async otaWriteCommand(chunk: InputBuffer): Promise<void> {
+		chunk = toDataView(chunk, 'Chunk');
+		if (chunk.byteLength < 1 || chunk.byteLength > DEFAULT_OTA_CHUNK_SIZE) {
+			throw new Error(`Invalid OTA chunk size (max ${DEFAULT_OTA_CHUNK_SIZE} bytes)`);
+		}
+
+		// Execute command
+		const reply = await this.sendCommandAndWaitReply(CMD_OTA_WRITE, chunk);
+
+		// Wait for server reply
+		this.raiseReplyErrorIfAny(reply);
+	}
+
+	// Cancels the active OTA session on the device.
+	public async otaCancelCommand(): Promise<void> {
+		// Execute command
+		const reply = await this.sendCommandAndWaitReply(CMD_OTA_CANCEL, new ArrayBuffer(0));
+
+		// Wait for server reply
+		this.raiseReplyErrorIfAny(reply);
+	}
+
+	// Uploads a complete firmware image using the OTA command sequence.
+	public async uploadFirmware(opts: OtaUploadOptions): Promise<void> {
+		if (typeof opts !== 'object' || opts === null) {
+			throw new Error('Options must be an object');
+		}
+
+		const chunkSize = validateOtaChunkSize(opts.chunkSize ?? DEFAULT_OTA_CHUNK_SIZE, DEFAULT_OTA_CHUNK_SIZE);
+		const totalBytes = resolveOtaImageSize(opts.image, opts.imageSize);
+		let sentBytes = 0;
+		let chunkIndex = 0;
+		let otaStarted = false;
+
+		throwIfAborted(opts.signal);
+
+		try {
+			await this.otaBeginCommand(totalBytes);
+			otaStarted = true;
+
+			for await (const chunk of iterateOtaChunks(opts.image, chunkSize)) {
+				throwIfAborted(opts.signal);
+				if (chunk.byteLength === 0) {
+					continue;
+				}
+				if (sentBytes + chunk.byteLength > totalBytes) {
+					throw new Error(`OTA stream exceeded the declared image size (${totalBytes} bytes)`);
+				}
+
+				await this.otaWriteCommand(chunk);
+				sentBytes += chunk.byteLength;
+				chunkIndex += 1;
+
+				if (opts.onProgress) {
+					await opts.onProgress({
+						sentBytes,
+						totalBytes,
+						chunkBytes: chunk.byteLength,
+						chunkIndex
+					});
+				}
+			}
+
+			if (sentBytes !== totalBytes) {
+				throw new Error(`OTA stream ended after ${sentBytes} bytes, expected ${totalBytes}`);
+			}
+		} catch (err) {
+			if (otaStarted && sentBytes < totalBytes && this.isConnected) {
+				try {
+					await this.otaCancelCommand();
+				} catch (_cancelErr) {
+					// Ignore cancel errors and preserve the original OTA failure.
+				}
+			}
+			throw err;
+		}
+	}
+
+	// Updates the device mDNS hostname.
 	public async setHostnameCommand(hostname: string): Promise<void> {
 		if (typeof hostname !== 'string' || hostname.length < 1 || hostname.length > 64) {
 			throw new Error('Invalid hostname');
 		}
 
 		// Execute command
-		// biome-ignore format: preserve uppercase hex
+		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_SET_MDNS_HOSTNAME,
 			[
@@ -515,6 +638,7 @@ export class Client {
 		this.raiseReplyErrorIfAny(reply);
 	}
 
+	// Closes the current connection and resolves when the close event is observed.
 	public async close(code?: number, reason?: string): Promise<CloseEvent> {
 		this.closeCounter += 1;
 
@@ -538,16 +662,19 @@ export class Client {
 		return p;
 	}
 
+	// Registers an event handler on the client emitter.
 	public on<K extends keyof ClientEvents>(event: K, handler: ClientEvents[K]): this {
 		this.emitter.on(event, handler as EventEmitter.EventListener<ClientEvents, K>);
 		return this;
 	}
 
+	// Removes a previously registered event handler from the client emitter.
 	public off<K extends keyof ClientEvents>(event: K, handler: ClientEvents[K]): this {
 		this.emitter.off(event, handler as EventEmitter.EventListener<ClientEvents, K>);
 		return this;
 	}
 
+	// Registers a one-time event handler on the client emitter.
 	public once<K extends keyof ClientEvents>(event: K, handler: ClientEvents[K]): this {
 		this.emitter.once(event, handler as EventEmitter.EventListener<ClientEvents, K>);
 		return this;

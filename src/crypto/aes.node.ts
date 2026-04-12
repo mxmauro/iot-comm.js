@@ -4,6 +4,7 @@ import type { IAesCrypto } from './aes.interface';
 
 // -----------------------------------------------------------------------------
 
+// Creates the Node.js AES crypto implementation.
 export const createAesCrypto = (): IAesCrypto => {
 	return new NodeAesCrypto();
 };

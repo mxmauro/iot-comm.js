@@ -9,6 +9,7 @@ const hkdfAsync = promisify(hkdf);
 
 // -----------------------------------------------------------------------------
 
+// Creates the Node.js HKDF crypto implementation.
 export const createHkdfCrypto = (): IHkdfCrypto => {
 	return new NodeHkdfCrypto();
 };
