@@ -1,6 +1,6 @@
 import EventEmitter from 'eventemitter3';
 import type { ConnectOptions, IWebSocket, WebSocketEvents } from './interface';
-import { CLOSE_ABNORMAL, CLOSE_NORMAL, CLOSED, CLOSING, CONNECTING, ConnectCloseError, ConnectTimeoutError, OPEN } from './interface';
+import { CLOSE_NORMAL, CLOSED, CLOSING, CONNECTING, ConnectCloseError, ConnectTimeoutError, OPEN } from './interface';
 
 // -----------------------------------------------------------------------------
 
@@ -69,7 +69,7 @@ export class BrowserWebSocket implements IWebSocket {
 					if (!settled) {
 						settled = true;
 						try {
-							ws.close(CLOSE_ABNORMAL, 'connect-timeout');
+							ws.close();
 						} catch {}
 						cleanup();
 						reject(new ConnectTimeoutError(timeout));
@@ -79,9 +79,6 @@ export class BrowserWebSocket implements IWebSocket {
 
 			ws.addEventListener('open', onOpenOnce);
 			ws.addEventListener('close', onCloseOnce);
-			ws.addEventListener('error', (event) => {
-				console.error('WebSocket error:', event);
-			});
 		});
 	}
 

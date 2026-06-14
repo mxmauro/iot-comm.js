@@ -1,0 +1,5 @@
+version: 1
+interface:
+  display_name: IoT Comm Library
+  short_description: Edit the iot-comm.js protocol client safely across browser and Node runtimes.
+  default_prompt: Maintain this repository's TypeScript IoT client while preserving protocol correctness, security checks, and cross-runtime behavior.

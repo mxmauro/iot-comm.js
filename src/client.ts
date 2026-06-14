@@ -7,7 +7,7 @@ import { randomize } from '@/crypto/random';
 import { createWebSocket } from '@/ws';
 import { ClientClosedError, CommandError } from './errors';
 import { fromB64, toB64 } from './utils/base64';
-import { type InputBuffer, toArrayBuffer, toDataView } from './utils/buffer';
+import { type InputBuffer, toDataView } from './utils/buffer';
 import type { OtaUploadOptions } from './utils/ota';
 import { iterateOtaChunks, resolveOtaImageSize, validateOtaChunkSize, validateOtaImageSize } from './utils/ota';
 import type { PromiseResolver } from './utils/promise';
@@ -70,6 +70,12 @@ const SESSION_IV_LEN = 12;
 const TAG_LEN = 16;
 const OTA_IMAGE_SIZE_LEN = 4;
 const DEFAULT_OTA_CHUNK_SIZE = MAX_MSG_SIZE;
+const WS_LOGIN_CONTEXT = Buffer.from([0x77, 0x73, 0x2d, 0x6c, 0x6f, 0x67, 0x69, 0x6e, 0x2d, 0x76, 0x31]); // "ws-login-v1"
+const SESSION_MASTER_INFO = Buffer.from([
+	0x6d, 0x78, 0x2d, 0x69, 0x6f, 0x74, 0x2d, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x2d, 0x6d, 0x61, 0x73, 0x74, 0x65, 0x72, 0x2d, 0x76,
+	0x31
+]); // "mx-iot-session-master-v1"
+const WS_TRANSPORT_INFO = Buffer.from([0x6d, 0x78, 0x2d, 0x69, 0x6f, 0x74, 0x2d, 0x77, 0x73, 0x2d, 0x76, 0x31]); // "mx-iot-ws-v1"
 
 // -----------------------------------------------------------------------------
 
@@ -235,15 +241,7 @@ export class Client {
 		const authNonce = randomize(NONCE_SIZE);
 
 		// t = "ws-login-v1" || c_pk || s_pk || s_nonce || c_nonce || cookie || auth_nonce
-		let t = [
-			Buffer.from([0x77, 0x73, 0x2d, 0x6c, 0x6f, 0x67, 0x69, 0x6e, 0x2d, 0x76, 0x31]), // "ws-login-v1"
-			ecdhServerPublicKey,
-			ecdhClientPublicKey,
-			serverNonce,
-			clientNonce,
-			cookie,
-			authNonce
-		];
+		let t = [WS_LOGIN_CONTEXT, ecdhServerPublicKey, ecdhClientPublicKey, serverNonce, clientNonce, cookie, authNonce];
 
 		// Sign T (SHA-256 is applied internally)
 		let signature = await ecdsa.sign(t);
@@ -286,23 +284,20 @@ export class Client {
 		// Compute shared secret and derive keys
 		const sharedSecret = await ecdh.computeSharedSecret();
 
-		// Build info
-		const info = toArrayBuffer([
-			Buffer.from([0x6d, 0x78, 0x2d, 0x69, 0x6f, 0x74]), // "mx-iot"
-			ecdhServerPublicKey,
-			ecdhClientPublicKey
-		]);
+		// Build session salt = SHA256("ws-login-v1" || s_nonce || c_nonce || cookie)
+		const sessionSalt = await hash256([WS_LOGIN_CONTEXT, serverNonce, clientNonce, cookie]);
 
-		// Build salt = SHA256("ws-login-v1" || s_nonce || c_nonce || cookie)
-		const salt = await hash256([
-			Buffer.from([0x77, 0x73, 0x2d, 0x6c, 0x6f, 0x67, 0x69, 0x6e, 0x2d, 0x76, 0x31]), // "ws-login-v1"
-			serverNonce,
-			clientNonce,
-			cookie
-		]);
+		const sessionMasterKey = await this.hkdf.deriveKey(toDataView(sharedSecret), sessionSalt, SESSION_MASTER_INFO, AES_KEY_LEN);
 
-		// Derive key
-		const derivedKey = await this.hkdf.deriveKey(toDataView(sharedSecret), salt, info, 2 * AES_KEY_LEN + 2 * SESSION_IV_LEN);
+		// Build WebSocket salt = SHA256("ws-login-v1" || s_nonce || c_nonce || cookie || ws_nonce)
+		const wsSalt = await hash256([WS_LOGIN_CONTEXT, serverNonce, clientNonce, cookie, wsNonce]);
+
+		const derivedKey = await this.hkdf.deriveKey(
+			toDataView(sessionMasterKey),
+			wsSalt,
+			WS_TRANSPORT_INFO,
+			2 * AES_KEY_LEN + 2 * SESSION_IV_LEN
+		);
 
 		const clientAesKey = derivedKey.slice(0, AES_KEY_LEN);
 		const serverAesKey = derivedKey.slice(AES_KEY_LEN, 2 * AES_KEY_LEN);
@@ -310,13 +305,7 @@ export class Client {
 		const serverBaseIV = derivedKey.slice(2 * AES_KEY_LEN + SESSION_IV_LEN);
 
 		// t = "ws-login-v1" || s_nonce || c_nonce || cookie || ws_nonce
-		t = [
-			Buffer.from([0x77, 0x73, 0x2d, 0x6c, 0x6f, 0x67, 0x69, 0x6e, 0x2d, 0x76, 0x31]), // "ws-login-v1"
-			serverNonce,
-			clientNonce,
-			cookie,
-			wsNonce
-		];
+		t = [WS_LOGIN_CONTEXT, serverNonce, clientNonce, cookie, wsNonce];
 
 		// Sign T (SHA-256 is applied internally)
 		signature = await ecdsa.sign(t);
@@ -398,7 +387,7 @@ export class Client {
 			if (publicKey.byteLength !== P256_PUBLIC_KEY_SIZE) {
 				throw new Error();
 			}
-			ecdsa.loadRawPublicKey(publicKey);
+			await ecdsa.loadRawPublicKey(publicKey);
 		} catch (_err) {
 			throw new Error('Invalid public key');
 		}
@@ -450,7 +439,7 @@ export class Client {
 			if (publicKey.byteLength !== P256_PUBLIC_KEY_SIZE) {
 				throw new Error();
 			}
-			ecdsa.loadRawPublicKey(publicKey);
+			await ecdsa.loadRawPublicKey(publicKey);
 		} catch (_err) {
 			throw new Error('Invalid public key');
 		}
@@ -493,7 +482,7 @@ export class Client {
 			if (publicKey.byteLength !== P256_PUBLIC_KEY_SIZE) {
 				throw new Error();
 			}
-			ecdsa.loadRawPublicKey(publicKey);
+			await ecdsa.loadRawPublicKey(publicKey);
 		} catch (_err) {
 			throw new Error('Invalid public key');
 		}
@@ -842,6 +831,9 @@ export class Client {
 		const bufView = new DataView(buf);
 		const utf8Decoder = new TextDecoder('utf-8');
 
+		if (bufView.byteLength < 4) {
+			throw new Error('Unexpected response buffer length');
+		}
 		// Extract code
 		const code = bufView.getUint32(0, false);
 		if (code === 0) {

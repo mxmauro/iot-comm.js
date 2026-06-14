@@ -1,0 +1,5 @@
+version: 1
+interface:
+  display_name: IoT Comm Security Review
+  short_description: Audit the iot-comm.js client for protocol, crypto, and transport risks.
+  default_prompt: Review this repository for concrete security and reliability issues, focusing on handshake flow, encrypted transport, runtime mismatches, and secret exposure.
