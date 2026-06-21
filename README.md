@@ -1,14 +1,18 @@
 # iot-comm.js
 
-A JavaScript client library for secure communication with ESP IoT devices running the [esp-iot-comm](https://github.com/mxmauro/esp-components/tree/master/esp_iot_comm) server component.
+A JavaScript client library for secure communication with ESP IoT devices running the
+[esp-iot-comm](https://github.com/mxmauro/esp-components/tree/master/esp_iot_comm) server component.
 
 ## Overview
 
-`iot-comm.js` provides a secure, WebSocket-based client for connecting to ESP32 IoT devices that use the esp-iot-comm component. It implements the same cryptographic protocols and communication patterns as the server, ensuring end-to-end security and reliable device control.
+`iot-comm.js` provides a secure, WebSocket-based client for connecting to ESP32 IoT devices that use the esp-iot-comm component. It
+implements the same cryptographic protocols and communication patterns as the server, ensuring end-to-end security and reliable device
+control.
 
 ## Key Features
 
-- **Secure Communication**: AES-256 encryption with ECDH key exchange, ECDSA authentication, and challenge-response protection against replay attacks.
+- **Secure Communication**: AES-256 encryption with ECDH key exchange, ECDSA authentication, and challenge-response protection against
+  replay attacks.
 - **WebSocket Transport**: Real-time bidirectional communication.
 - **User Management**: Create, delete, and manage user accounts on the device.
 - **Credential Management**: Change and reset user credentials securely.
@@ -16,6 +20,7 @@ A JavaScript client library for secure communication with ESP IoT devices runnin
 - **Cross-Platform**: Works in both Node.js and browser environments.
 - **Event-Driven**: Listen for messages and connection events.
 - **TypeScript Support**: Full TypeScript definitions included.
+- **Server Identity Hook**: Optional SHA-256 fingerprint approval callback before authentication continues.
 
 ## Installation
 
@@ -74,9 +79,17 @@ const client = new Client();
 await client.connect({
 	hostname: '192.168.1.25:80',
 	username: 'admin',
-	privateKey: '<base64-private-key>'
+	privateKey: '<base64-private-key>',
+	verifyServerFingerprint: async (fingerprint) => {
+		return fingerprint === '<sha256-device-public-key-hex>';
+	}
 });
 ```
+
+The `verifyServerFingerprint` callback receives the uppercase hexadecimal `SHA-256(devicePublicKey)` fingerprint derived
+from the `/ws/init` response after the library verifies the server-provided device signature. Returning `true` continues
+the connection, returning `false` aborts it with `ConnectionAbortedError`, and thrown errors are propagated from
+`connect()`.
 
 ### Upload firmware with OTA
 
@@ -89,7 +102,8 @@ await client.uploadFirmware({
 });
 ```
 
-For browser use, `Blob` is the simplest input type. For Node.js or advanced cases, you can also pass an `ArrayBuffer`, `Uint8Array`, `Buffer`, or a sync/async iterable of chunks. When the image source is iterable, you must also provide `imageSize`.
+For browser use, `Blob` is the simplest input type. For Node.js or advanced cases, you can also pass an `ArrayBuffer`, `Uint8Array`,
+`Buffer`, or a sync/async iterable of chunks. When the image source is iterable, you must also provide `imageSize`.
 
 ```ts
 await client.uploadFirmware({

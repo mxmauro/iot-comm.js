@@ -16,6 +16,7 @@ export const CreateUserPanel = () => {
 	const [username, setUsername] = useState('');
 	const [publicKey, setPublicKey] = useState('');
 	const [repeatPublicKey, setRepeatPublicKey] = useState('');
+	const [mustChangeCredentialsOnNextLogin, setMustChangeCredentialsOnNextLogin] = useState(false);
 
 	const [publicKeyReadOnly, setPublicKeyReadOnly] = useState(true);
 	const [repeatPublicKeyReadOnly, setRepeatPublicKeyReadOnly] = useState(true);
@@ -35,6 +36,9 @@ export const CreateUserPanel = () => {
 	const handleRepeatPublicKeyInput = (e) => {
 		const v = e.target.value;
 		setRepeatPublicKey(v);
+	};
+	const handleMustChangeCredentialsOnNextLoginInput = (e) => {
+		setMustChangeCredentialsOnNextLogin(e.target.checked);
 	};
 
 	const handleSendBtn = (e) => {
@@ -73,16 +77,19 @@ export const CreateUserPanel = () => {
 			return;
 		}
 
+		const flags = mustChangeCredentialsOnNextLogin ? window.iotComm.Client.USER_CREATE_FLAG_MUST_CHANGE_CREDENTIALS_ON_NEXT_LOGIN : 0;
+
 		// Send command
 		setWaitingReply(true);
 		client
-			.createUserCommand(username, publicKeyBytes)
+			.createUserCommand(username, publicKeyBytes, flags)
 			.then(() => {
 				if (isMounted) {
 					showToast('User successfully created.', 'success');
 					setUsername('');
 					setPublicKey('');
 					setRepeatPublicKey('');
+					setMustChangeCredentialsOnNextLogin(false);
 					setWaitingReply(false);
 				}
 			})
@@ -158,6 +165,15 @@ export const CreateUserPanel = () => {
 							<small role="status" className='pico-color-red-500'>${repeatPublicKeyError}</small>
 						`
 						}
+					</label>
+					<label>
+						<input
+							type="checkbox"
+							checked=${mustChangeCredentialsOnNextLogin}
+							onInput=${handleMustChangeCredentialsOnNextLoginInput}
+							disabled=${waitingReply}
+						/>
+						Must change credentials on next login
 					</label>
 				</fieldset>
 				<div class="grid">

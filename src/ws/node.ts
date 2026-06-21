@@ -39,6 +39,9 @@ export class NodeWebSocket implements IWebSocket {
 		if (opts.protocols) {
 			wsOpts.protocol = Array.isArray(opts.protocols) ? opts.protocols.join(', ') : opts.protocols;
 		}
+		if (opts.headers) {
+			wsOpts.headers = opts.headers;
+		}
 
 		const ws = new WebSocket(opts.url, wsOpts);
 		ws.binaryType = 'arraybuffer';

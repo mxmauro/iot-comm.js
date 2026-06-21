@@ -33,6 +33,7 @@ export interface IWebSocket {
 export interface ConnectOptions {
 	url: string;
 	protocols?: string | string[];
+	headers?: Record<string, string>;
 	timeoutMs?: number;
 }
 

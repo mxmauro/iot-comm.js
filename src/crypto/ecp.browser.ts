@@ -109,7 +109,7 @@ class BaseBrowserEcpCrypto {
 		return privateKeyBytes;
 	}
 
-	private createPkcs8PrivateKey(privKey: InputBuffer): ArrayBuffer {
+	protected createPkcs8PrivateKey(privKey: InputBuffer): ArrayBuffer {
 		if (privKey.byteLength !== 32) {
 			throw new Error('Private key size must be 32 bytes');
 		}

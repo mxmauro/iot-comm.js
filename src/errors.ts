@@ -2,6 +2,20 @@ import type { CloseEvent } from './ws/interface';
 
 // -----------------------------------------------------------------------------
 
+// Reports that a connection attempt was intentionally aborted by client policy.
+export class ConnectionAbortedError extends Error {
+	constructor(message = 'Connection aborted') {
+		super(message);
+		this.name = 'ConnectionAbortedError';
+
+		if (Error.captureStackTrace) {
+			Error.captureStackTrace(this, ConnectionAbortedError);
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+
 // Reports that an operation failed because the client connection closed.
 export class ClientClosedError extends Error {
 	public readonly code: number;
