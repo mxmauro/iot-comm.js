@@ -5,8 +5,13 @@
 - Treat this as a TypeScript library first. Preserve the current split between protocol/client code in `src/client.ts`, runtime-specific
   adapters under `src/crypto/` and `src/ws/`, reusable helpers under `src/utils/`, examples under `examples/`, and generated bundles under
   `dist/`.
-- Make the smallest change that solves the task. Do not reformat unrelated code.
 - Do not touch unrelated user changes. This repository may be dirty.
+
+## Working principles
+- Think before coding. State assumptions explicitly, surface ambiguity or tradeoffs instead of picking silently, and ask for clarification when requirements or nearby code are unclear.
+- Simplicity first. Make the smallest change that solves the task. Do not add speculative abstractions, configurability, or behavior that was not requested.
+- Surgical changes. Keep diffs limited to the requested behavior, tests, and directly required documentation. Do not reformat unrelated code or fix adjacent issues unless they block the task. Remove only exports, helpers, or generated references that your change made unused.
+- Goal-driven execution. Define the verification target before editing, prefer focused checks that prove the changed behavior, and broaden validation only as the change scope requires.
 
 ## File format
 - Use LF line endings for text files.
@@ -51,13 +56,10 @@
 - Prefer explicit size limits and input normalization on all externally supplied data.
 
 ## Review and testing guidance
-- Read nearby code before editing and match its local style.
-- Prefer focused patches over broad cleanup.
 - When behavior changes, run the relevant project checks. The current baseline is `npm run build`, which also runs Biome checks before
   bundling.
 - Add or update automated tests if the repository gains a test harness. Until then, call out manual verification needs clearly for protocol,
   browser, Node.js, or OTA paths you change.
-- Do not fix unrelated bugs while editing unless they block the requested change.
 
 ## Documentation and generated output
 - Keep Markdown concise and consistent with the repository's current tone.
@@ -65,6 +67,5 @@
 - Treat `dist/` as generated output. Prefer editing source files and regenerating artifacts rather than hand-editing built bundles.
 
 ## Editing rules for agents
-- Before changing a file, read the nearby code and match its local style.
 - Preserve untouched regions exactly.
 - If a task creates tension between style and security, prioritize security while keeping the diff as small as possible.

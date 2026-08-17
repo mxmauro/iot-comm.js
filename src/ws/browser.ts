@@ -1,4 +1,5 @@
 import EventEmitter from 'eventemitter3';
+import { throwIfAborted } from '../utils/signal';
 import type { ConnectOptions, IWebSocket, WebSocketEvents } from './interface';
 import { CLOSE_NORMAL, CLOSED, CLOSING, CONNECTING, ConnectCloseError, ConnectTimeoutError, OPEN } from './interface';
 
@@ -25,6 +26,7 @@ export class BrowserWebSocket implements IWebSocket {
 		if (this.ws) {
 			throw new Error('WebSocket is already connected');
 		}
+		throwIfAborted(opts.signal);
 
 		const url = opts.url.replace(/^http/, 'ws');
 
@@ -42,6 +44,8 @@ export class BrowserWebSocket implements IWebSocket {
 
 				ws.removeEventListener('open', onOpenOnce);
 				ws.removeEventListener('close', onCloseOnce);
+				ws.removeEventListener('error', onErrorOnce);
+				opts.signal?.removeEventListener('abort', onAbort);
 			};
 
 			const onOpenOnce = () => {
@@ -63,6 +67,32 @@ export class BrowserWebSocket implements IWebSocket {
 				}
 			};
 
+			const onErrorOnce = () => {
+				if (!settled) {
+					settled = true;
+					try {
+						ws.close();
+					} catch {}
+					cleanup();
+					reject(new Error('WebSocket connection failed'));
+				}
+			};
+
+			const onAbort = () => {
+				if (!settled) {
+					settled = true;
+					try {
+						ws.close();
+					} catch {}
+					cleanup();
+					try {
+						throwIfAborted(opts.signal);
+					} catch (err) {
+						reject(err);
+					}
+				}
+			};
+
 			if (opts.timeoutMs && opts.timeoutMs > 0) {
 				const timeout = opts.timeoutMs;
 				timeoutId = setTimeout(() => {
@@ -79,6 +109,11 @@ export class BrowserWebSocket implements IWebSocket {
 
 			ws.addEventListener('open', onOpenOnce);
 			ws.addEventListener('close', onCloseOnce);
+			ws.addEventListener('error', onErrorOnce);
+			opts.signal?.addEventListener('abort', onAbort, { once: true });
+			if (opts.signal?.aborted) {
+				onAbort();
+			}
 		});
 	}
 

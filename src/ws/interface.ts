@@ -35,6 +35,8 @@ export interface ConnectOptions {
 	protocols?: string | string[];
 	headers?: Record<string, string>;
 	timeoutMs?: number;
+	maxPayload?: number;
+	signal?: AbortSignal;
 }
 
 // Describes the events emitted by a WebSocket transport implementation.

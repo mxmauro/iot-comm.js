@@ -26,17 +26,10 @@ control.
 
 ### NodeJS
 
-Install from GitHub Packages:
+Install from npm:
 
 ```bash
-npm config set @mxmauro:registry https://npm.pkg.github.com/
 npm install @mxmauro/iot-comm.js
-```
-
-Or install directly by specifying the registry:
-
-```bash
-npm install @mxmauro/iot-comm.js --registry https://npm.pkg.github.com/
 ```
 
 ### CDN
@@ -90,6 +83,24 @@ The `verifyServerFingerprint` callback receives the uppercase hexadecimal `SHA-2
 from the `/ws/init` response after the library verifies the server-provided device signature. Returning `true` continues
 the connection, returning `false` aborts it with `ConnectionAbortedError`, and thrown errors are propagated from
 `connect()`.
+
+### Cancel connection setup
+
+Pass an `AbortSignal` to cancel an in-progress `connect()` call. The signal affects only setup; aborting it after a
+successful connection does not close the session.
+
+```ts
+const abortController = new AbortController();
+const connecting = client.connect({
+	hostname: '192.168.1.25:80',
+	username: 'admin',
+	privateKey: '<base64-private-key>',
+	signal: abortController.signal
+});
+
+abortController.abort(new Error('Connection cancelled'));
+await connecting;
+```
 
 ### Upload firmware with OTA
 

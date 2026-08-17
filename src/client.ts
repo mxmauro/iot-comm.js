@@ -73,6 +73,10 @@ const SESSION_IV_LEN = 12;
 const TAG_LEN = 16;
 const OTA_IMAGE_SIZE_LEN = 4;
 const DEFAULT_OTA_CHUNK_SIZE = MAX_MSG_SIZE;
+
+const HANDSHAKE_TIMEOUT_MS = 10000;
+const WEBSOCKET_CONNECT_TIMEOUT_MS = 10000;
+
 // biome-ignore format: preserve multiple lines
 const WS_LOGIN_CONTEXT = Buffer.from([
 	0x77, 0x73, 0x2d, 0x6c, 0x6f, 0x67, 0x69, 0x6e, 0x2d, 0x76, 0x31
@@ -99,6 +103,10 @@ const SESSION_MASTER_INFO = Buffer.from([
 const WS_TRANSPORT_INFO = Buffer.from([
 	0x6d, 0x78, 0x2d, 0x69, 0x6f, 0x74, 0x2d, 0x77, 0x73, 0x2d, 0x76, 0x31
 ]); // "mx-iot-ws-v1"
+// biome-ignore format: preserve multiple lines
+const WS_CHANGE_CREDS = Buffer.from([
+	0x77, 0x73, 0x2d, 0x63, 0x68, 0x67, 0x63, 0x72, 0x65, 0x64, 0x73, 0x2d, 0x76, 0x31
+]); // "ws-chgcreds-v1"
 
 // -----------------------------------------------------------------------------
 
@@ -140,6 +148,7 @@ export type ConnectOptions = {
 	hostname: string;
 	username: string;
 	privateKey: InputBuffer | string;
+	signal?: AbortSignal;
 	verifyServerFingerprint?: VerifyServerFingerprintFn;
 };
 
@@ -197,6 +206,9 @@ export class Client {
 		if (typeof opts !== 'object' || opts === null) {
 			throw new Error('Options must be an object');
 		}
+
+		throwIfAborted(opts.signal);
+
 		if (!isValidHostnameAndPort(opts.hostname)) {
 			throw new Error('Invalid server hostname and port');
 		}
@@ -225,20 +237,28 @@ export class Client {
 		const ecdhClientPublicKey = await ecdh.saveRawPublicKey();
 
 		// Call INIT endpoint
-		let response = await fetch(`${baseUrl}ws/init`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
+		const initResponse = await fetchWithHandshakeTimeout(
+			async (signal) => {
+				const response = await fetch(`${baseUrl}ws/init`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						clientNonce: toB64(clientNonce),
+						clientPublicKey: toB64(ecdhClientPublicKey)
+					}),
+					credentials: 'include',
+					signal
+				});
+				if (response.status !== 200) {
+					throw new Error(`Unexpected status code ${response.status} received`);
+				}
+				return response.json() as Promise<InitResponse>;
 			},
-			body: JSON.stringify({
-				clientNonce: toB64(clientNonce),
-				clientPublicKey: toB64(ecdhClientPublicKey)
-			}),
-			credentials: 'include'
-		});
-		if (response.status !== 200) {
-			throw new Error(`Unexpected status code ${response.status} received`);
-		}
+			opts.signal,
+			HANDSHAKE_TIMEOUT_MS
+		);
 
 		// Parse response
 		let cookie: ArrayBuffer;
@@ -248,7 +268,6 @@ export class Client {
 		let deviceSignature: ArrayBuffer;
 
 		try {
-			const initResponse = await (response.json() as Promise<InitResponse>);
 			if (
 				typeof initResponse.token !== 'string' ||
 				typeof initResponse.serverNonce !== 'string' ||
@@ -341,24 +360,32 @@ export class Client {
 		);
 
 		// Call AUTH endpoint
-		response = await fetch(`${baseUrl}ws/auth`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
+		const authResponse = await fetchWithHandshakeTimeout(
+			async (signal) => {
+				const response = await fetch(`${baseUrl}ws/auth`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						token: toB64(cookie),
+						authIv: toB64(authIv),
+						encryptedAuth: toB64(encryptedAuth)
+					}),
+					credentials: 'include',
+					signal
+				});
+				if (response.status === 401) {
+					throw new Error('Authentication failed');
+				}
+				if (response.status !== 200) {
+					throw new Error(`Unexpected status code ${response.status} received`);
+				}
+				return response.json() as Promise<AuthResponse>;
 			},
-			body: JSON.stringify({
-				token: toB64(cookie),
-				authIv: toB64(authIv),
-				encryptedAuth: toB64(encryptedAuth)
-			}),
-			credentials: 'include'
-		});
-		if (response.status === 401) {
-			throw new Error(`Authentication failed`);
-		}
-		if (response.status !== 200) {
-			throw new Error(`Unexpected status code ${response.status} received`);
-		}
+			opts.signal,
+			HANDSHAKE_TIMEOUT_MS
+		);
 
 		// Parse response
 		let mustChangeCredentials: boolean;
@@ -366,7 +393,6 @@ export class Client {
 		let wsTicket: string;
 
 		try {
-			const authResponse = await (response.json() as Promise<AuthResponse>);
 			if (
 				typeof authResponse.mustChangeCredentials !== 'boolean' ||
 				typeof authResponse.wsNonce !== 'string' ||
@@ -415,7 +441,9 @@ export class Client {
 				: {
 						Authorization: `Bearer ${wsTicket}`
 					},
-			timeoutMs: 10000
+			timeoutMs: WEBSOCKET_CONNECT_TIMEOUT_MS,
+			maxPayload: PACKET_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN,
+			signal: opts.signal
 		});
 
 		// Init AES ciphers
@@ -599,11 +627,7 @@ export class Client {
 		}
 
 		// t = "ws-chgcreds-v1" || publicKey || ws_nonce
-		const t = [
-			Buffer.from([0x77, 0x73, 0x2d, 0x63, 0x68, 0x67, 0x63, 0x72, 0x65, 0x64, 0x73, 0x2d, 0x76, 0x31]), // "ws-chgcreds-v1"
-			publicKey,
-			this.wsNonce
-		];
+		const t = [WS_CHANGE_CREDS, publicKey, this.wsNonce];
 
 		// Sign T (SHA-256 is applied internally)
 		const signature = await ecdsa.sign(t);
@@ -811,7 +835,7 @@ export class Client {
 		}
 
 		// Encrypt data
-		const encrypted = await this.clientAes.encrypt(data, iv);
+		const encrypted = await this.clientAes.encrypt(data, iv, header);
 
 		// Send it
 		this.ws.send(Buffer.concat([header, new Uint8Array(encrypted)]));
@@ -874,7 +898,7 @@ export class Client {
 		const ciphertextView = new DataView(data, PACKET_HEADER_LEN, data.byteLength - PACKET_HEADER_LEN);
 		const thisCloseCounter = this.closeCounter;
 		this.serverAes
-			.decrypt(ciphertextView, iv)
+			.decrypt(ciphertextView, iv, headerView)
 			.then((plaintext) => {
 				if (thisCloseCounter === this.closeCounter) {
 					// Process message
@@ -970,6 +994,34 @@ export class Client {
 
 const isBrowserRuntime = (): boolean => {
 	return typeof window !== 'undefined' && typeof document !== 'undefined';
+};
+
+const fetchWithHandshakeTimeout = async <T>(
+	callback: (signal: AbortSignal) => Promise<T>,
+	signal?: AbortSignal,
+	timeoutMs: number = HANDSHAKE_TIMEOUT_MS
+): Promise<T> => {
+	throwIfAborted(signal);
+
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+	const onAbort = () => controller.abort(signal?.reason);
+	signal?.addEventListener('abort', onAbort, { once: true });
+
+	try {
+		return await callback(controller.signal);
+	} catch (err) {
+		if (signal?.aborted) {
+			throwIfAborted(signal);
+		}
+		if (controller.signal.aborted) {
+			throw new Error(`Handshake request timed out after ${timeoutMs} ms`);
+		}
+		throw err;
+	} finally {
+		clearTimeout(timeoutId);
+		signal?.removeEventListener('abort', onAbort);
+	}
 };
 
 const toHex = (buf: ArrayBuffer): string => {

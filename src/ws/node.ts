@@ -1,5 +1,6 @@
 import EventEmitter from 'eventemitter3';
 import WebSocket from 'ws';
+import { throwIfAborted } from '../utils/signal';
 import type { ConnectOptions, IWebSocket, WebSocketEvents } from './interface';
 import { CLOSE_NORMAL, CLOSED, CLOSING, CONNECTING, ConnectCloseError, ConnectTimeoutError, OPEN } from './interface';
 
@@ -24,6 +25,7 @@ export class NodeWebSocket implements IWebSocket {
 	constructor() {
 		this.onWsMessage = this.onWsMessage.bind(this);
 		this.onWsClose = this.onWsClose.bind(this);
+		this.onWsError = this.onWsError.bind(this);
 	}
 
 	// Connect and wait until the socket either opens or closes/errors.
@@ -32,10 +34,14 @@ export class NodeWebSocket implements IWebSocket {
 		if (this.ws) {
 			throw new Error('WebSocket is already connected');
 		}
+		throwIfAborted(opts.signal);
 
 		const wsOpts: WebSocket.ClientOptions = {
 			followRedirects: true
 		};
+		if (opts.maxPayload) {
+			wsOpts.maxPayload = opts.maxPayload;
+		}
 		if (opts.protocols) {
 			wsOpts.protocol = Array.isArray(opts.protocols) ? opts.protocols.join(', ') : opts.protocols;
 		}
@@ -45,6 +51,7 @@ export class NodeWebSocket implements IWebSocket {
 
 		const ws = new WebSocket(opts.url, wsOpts);
 		ws.binaryType = 'arraybuffer';
+		ws.on('error', this.onWsError);
 
 		return new Promise<void>((resolve, reject) => {
 			let settled = false;
@@ -57,6 +64,8 @@ export class NodeWebSocket implements IWebSocket {
 
 				ws.off('open', onOpenOnce);
 				ws.off('close', onCloseOnce);
+				ws.off('error', onErrorOnce);
+				opts.signal?.removeEventListener('abort', onAbort);
 			};
 
 			const onOpenOnce = () => {
@@ -78,6 +87,45 @@ export class NodeWebSocket implements IWebSocket {
 				}
 			};
 
+			const onAbort = () => {
+				if (!settled) {
+					settled = true;
+					try {
+						ws.close();
+					} catch {}
+					cleanup();
+					try {
+						throwIfAborted(opts.signal);
+					} catch (err) {
+						reject(err);
+					}
+				}
+			};
+
+			const onErrorOnce = (err: Error & SocketError) => {
+				if (settled) {
+					return;
+				}
+
+				settled = true;
+				try {
+					ws.close();
+				} catch {}
+				cleanup();
+
+				if (typeof err.message === 'string') {
+					const idx = err.message.indexOf('Unexpected server response:');
+					if (idx >= 0) {
+						const status = +err.message.substring(idx + 27).trim();
+						if (status >= 400 && status <= 599) {
+							reject(new ConnectCloseError(0, `Status code: ${status}`));
+							return;
+						}
+					}
+				}
+				reject(err);
+			};
+
 			if (opts.timeoutMs && opts.timeoutMs > 0) {
 				const timeout = opts.timeoutMs;
 				timeoutId = setTimeout(() => {
@@ -94,23 +142,11 @@ export class NodeWebSocket implements IWebSocket {
 
 			ws.once('open', onOpenOnce);
 			ws.once('close', onCloseOnce);
-
-			ws.on('error', (err: Error & SocketError) => {
-				if (typeof err.message === 'string') {
-					const idx = err.message.indexOf('Unexpected server response:');
-					if (idx >= 0) {
-						const status = +err.message.substring(idx + 27).trim();
-						if (status >= 400 && status <= 599) {
-							if (!settled) {
-								settled = true;
-								cleanup();
-								reject(new ConnectCloseError(0, `Status code: ${status}`));
-								return;
-							}
-						}
-					}
-				}
-			});
+			ws.once('error', onErrorOnce);
+			opts.signal?.addEventListener('abort', onAbort, { once: true });
+			if (opts.signal?.aborted) {
+				onAbort();
+			}
 		});
 	}
 
@@ -182,10 +218,13 @@ export class NodeWebSocket implements IWebSocket {
 		});
 	}
 
+	private onWsError(): void {}
+
 	private detachForwarders() {
 		if (this.ws) {
 			this.ws.off('message', this.onWsMessage);
 			this.ws.off('close', this.onWsClose);
+			this.ws.off('error', this.onWsError);
 		}
 	}
 }
