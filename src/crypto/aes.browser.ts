@@ -1,5 +1,5 @@
 import { type InputBuffer, toArrayBufferView } from '../utils/buffer';
-import type { IAesCrypto } from './aes.interface';
+import { GCM_LEN, type IAesCrypto } from './aes.interface';
 
 // -----------------------------------------------------------------------------
 
@@ -27,7 +27,7 @@ class BrowserAesCrypto implements IAesCrypto {
 				name: 'AES-GCM',
 				iv: toArrayBufferView(iv),
 				...(aad && { additionalData: aad }),
-				tagLength: 16 * 8
+				tagLength: GCM_LEN * 8
 			},
 			this.cryptoKey,
 			toArrayBufferView(plaintext)
@@ -40,13 +40,16 @@ class BrowserAesCrypto implements IAesCrypto {
 		if (!this.cryptoKey) {
 			throw new Error('Crypto key not set');
 		}
+		if (ciphertext.byteLength < GCM_LEN) {
+			throw new Error('Invalid chiphered text');
+		}
 
 		const decrypted = await crypto.subtle.decrypt(
 			{
 				name: 'AES-GCM',
 				iv: toArrayBufferView(iv),
 				...(aad && { additionalData: aad }),
-				tagLength: 16 * 8
+				tagLength: GCM_LEN * 8
 			},
 			this.cryptoKey,
 			toArrayBufferView(ciphertext)

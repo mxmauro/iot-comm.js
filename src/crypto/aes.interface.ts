@@ -2,6 +2,10 @@ import type { InputBuffer } from '../utils/buffer';
 
 // -----------------------------------------------------------------------------
 
+export const GCM_LEN = 16;
+
+// -----------------------------------------------------------------------------
+
 // Defines the AES operations required by the protocol implementation.
 export interface IAesCrypto {
 	setKey(key: InputBuffer): Promise<void>;

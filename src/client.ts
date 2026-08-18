@@ -5,6 +5,7 @@ import { hash256 } from '@/crypto/hash';
 import { createHkdfCrypto } from '@/crypto/hkdf';
 import { randomize } from '@/crypto/random';
 import { createWebSocket } from '@/ws';
+import { GCM_LEN } from './crypto/aes.interface';
 import { ClientClosedError, CommandError, ConnectionAbortedError } from './errors';
 import { fromB64, toB64 } from './utils/base64';
 import { type InputBuffer, toDataView } from './utils/buffer';
@@ -70,7 +71,7 @@ const P256_PUBLIC_KEY_SIZE = 65;
 const P256_SIGNATURE_SIZE = 64;
 const AES_KEY_LEN = 32;
 const SESSION_IV_LEN = 12;
-const TAG_LEN = 16;
+const TAG_LEN = GCM_LEN;
 const OTA_IMAGE_SIZE_LEN = 4;
 const DEFAULT_OTA_CHUNK_SIZE = MAX_MSG_SIZE;
 

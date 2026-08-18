@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv } from 'node:crypto';
 import { type InputBuffer, toArrayBuffer, toDataView } from '../utils/buffer';
-import type { IAesCrypto } from './aes.interface';
+import { GCM_LEN, type IAesCrypto } from './aes.interface';
 
 // -----------------------------------------------------------------------------
 
@@ -25,7 +25,7 @@ class NodeAesCrypto implements IAesCrypto {
 		}
 
 		const cipher = createCipheriv('aes-256-gcm', this.keyView, toDataView(iv), {
-			authTagLength: 16
+			authTagLength: GCM_LEN
 		});
 		if (aad) {
 			cipher.setAAD(aad);
@@ -45,11 +45,11 @@ class NodeAesCrypto implements IAesCrypto {
 			throw new Error('Crypto key not set');
 		}
 
-		if (ciphertext.byteLength < 16) {
+		if (ciphertext.byteLength < GCM_LEN) {
 			throw new Error('Invalid chiphered text');
 		}
 		const decipher = createDecipheriv('aes-256-gcm', this.keyView, toDataView(iv), {
-			authTagLength: 16
+			authTagLength: GCM_LEN
 		});
 		if (aad) {
 			decipher.setAAD(toDataView(aad));
@@ -57,8 +57,10 @@ class NodeAesCrypto implements IAesCrypto {
 
 		ciphertext = toDataView(ciphertext);
 
-		const encryptedPart = new DataView(ciphertext.buffer.slice(ciphertext.byteOffset, ciphertext.byteOffset + ciphertext.byteLength - 16));
-		const authTag = new DataView(ciphertext.buffer.slice(ciphertext.byteOffset + ciphertext.byteLength - 16));
+		const encryptedPart = new DataView(
+			ciphertext.buffer.slice(ciphertext.byteOffset, ciphertext.byteOffset + ciphertext.byteLength - GCM_LEN)
+		);
+		const authTag = new DataView(ciphertext.buffer.slice(ciphertext.byteOffset + ciphertext.byteLength - GCM_LEN));
 
 		decipher.setAuthTag(authTag);
 
