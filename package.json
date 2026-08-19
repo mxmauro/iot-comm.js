@@ -1,6 +1,6 @@
 {
 	"name": "@mxmauro/iot-comm.js",
-	"version": "0.1.7",
+	"version": "0.2.0",
 	"description": "Javascript library to communicate with ESP IoT devices using the IoT-Comm library",
 	"license": "MIT",
 	"author": "Mauro H. Leggieri",

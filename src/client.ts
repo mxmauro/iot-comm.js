@@ -62,8 +62,11 @@ const CMD_SET_MDNS_HOSTNAME = 0x7000;
 //       hostname: NUL-terminated string
 
 const VERSION = 1;
-const PACKET_HEADER_LEN = 16; // bytes
+const WS_COMMON_HEADER_LEN = 12; // bytes
+const WS_REPLY_HEADER_LEN = 20; // bytes
 const MAX_MSG_SIZE = 2000;
+const MAX_PACKET_COUNTER = 0xffffffffffffffffn;
+const LAST_USABLE_PACKET_COUNTER = MAX_PACKET_COUNTER - 1n;
 
 const COOKIE_SIZE = 12;
 const NONCE_SIZE = 16;
@@ -182,9 +185,9 @@ export class Client {
 	private clientBaseIV = new ArrayBuffer();
 	private serverBaseIV = new ArrayBuffer();
 	private wsNonce = new ArrayBuffer();
-	private nextRxCounter: number = 0;
-	private nextTxCounter: number = 0;
-	private waitingReplyMap: Map<number, WaitingReplyElement> = new Map();
+	private nextRxCounter: bigint = 0n;
+	private nextTxCounter: bigint = 0n;
+	private waitingReplyMap: Map<bigint, WaitingReplyElement> = new Map();
 	private waitingCloseQueue: WaitingCloseElement[] = [];
 
 	// Generates a fresh ECDSA key pair suitable for device authentication.
@@ -443,7 +446,7 @@ export class Client {
 						Authorization: `Bearer ${wsTicket}`
 					},
 			timeoutMs: WEBSOCKET_CONNECT_TIMEOUT_MS,
-			maxPayload: PACKET_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN,
+			maxPayload: WS_REPLY_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN,
 			signal: opts.signal
 		});
 
@@ -458,8 +461,8 @@ export class Client {
 		this.clientBaseIV = clientBaseIV;
 		this.serverBaseIV = serverBaseIV;
 		this.wsNonce = wsNonce;
-		this.nextRxCounter = 1;
-		this.nextTxCounter = 1;
+		this.nextRxCounter = 1n;
+		this.nextTxCounter = 1n;
 
 		this.ws = ws;
 		this.ws.on('message', (data) => this.onMessage(data));
@@ -819,20 +822,25 @@ export class Client {
 
 		// Get TX counter
 		const txCounter = this.nextTxCounter;
+		if (txCounter > LAST_USABLE_PACKET_COUNTER) {
+			throw new Error('WebSocket session exhausted; reconnect before sending another command');
+		}
+		this.nextTxCounter += 1n;
 
-		// Header { v(1) | cmd(2) | filler(1) | replyCounter(4) | counter(4) | filler(4) }
-		const header = Buffer.alloc(PACKET_HEADER_LEN);
-		header.writeUInt8(VERSION, 0); // v
-		header.writeUInt16BE(cmd, 1); //cmd
-		header.writeUInt8(0, 3); //filler1
-		header.writeUInt32BE(0, 4); //reply counter
-		header.writeUInt32BE(txCounter, 8); // counter
-		header.writeUInt32BE(0, 12); // filler2
+		// Header { v(1) | cmd(2) | flags(1) | counter(8) }
+		const header = new Uint8Array(WS_COMMON_HEADER_LEN);
+		const headerView = new DataView(header.buffer);
+		headerView.setUint8(0, VERSION); // v
+		headerView.setUint16(1, cmd, false); // cmd
+		headerView.setUint8(3, 0); // flags
+		headerView.setBigUint64(4, txCounter, false); // counter
 
 		// Build IV
 		const iv = new Uint8Array(new Uint8Array(this.clientBaseIV));
-		for (let i = 0; i < 4; i++) {
-			iv[SESSION_IV_LEN - i - 1] ^= (txCounter >> (i << 3)) & 0xff;
+		const counterView = new DataView(new ArrayBuffer(8));
+		counterView.setBigUint64(0, txCounter, false);
+		for (let i = 0; i < 8; i++) {
+			iv[SESSION_IV_LEN - 8 + i] ^= counterView.getUint8(i);
 		}
 
 		// Encrypt data
@@ -840,9 +848,6 @@ export class Client {
 
 		// Send it
 		this.ws.send(Buffer.concat([header, new Uint8Array(encrypted)]));
-
-		// Increment write counter
-		this.nextTxCounter += 1;
 	}
 
 	private onMessage(data: string | ArrayBuffer): void {
@@ -858,28 +863,44 @@ export class Client {
 		}
 
 		// Check message size
-		if (data.byteLength < PACKET_HEADER_LEN) {
+		if (data.byteLength < WS_COMMON_HEADER_LEN + TAG_LEN) {
 			// Packet too short to contain header + tag
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: packet too short');
 			return;
 		}
-		if (data.byteLength > PACKET_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN) {
+		if (data.byteLength > WS_REPLY_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN) {
 			// Packet too short to contain header + tag
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: packet too long');
 			return;
 		}
 
-		// Extract header and validate version and RX counter (a.k.a. nonce)
-		// Header { v(1) | cmd(2) | filler(1) | replyCounter(4) | counter(4) | filler(4) }
-		const headerView = new DataView(data, 0, PACKET_HEADER_LEN);
-		const version = headerView.getUint8(0);
-		const cmd = headerView.getUint16(1, false); // big-endian
-		const replyCounter = headerView.getUint32(4, false); // big-endian
-		const rxCounter = headerView.getUint32(8, false); // big-endian
+		// Parse the common header before checking whether this is a reply.
+		const commonHeaderView = new DataView(data, 0, WS_COMMON_HEADER_LEN);
+		const version = commonHeaderView.getUint8(0);
+		const cmd = commonHeaderView.getUint16(1, false); // big-endian
+		const flags = commonHeaderView.getUint8(3);
+		const rxCounter = commonHeaderView.getBigUint64(4, false); // big-endian
 
 		if (version !== VERSION) {
 			// Unsupported version
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: unsupported version');
+			return;
+		}
+		if ((flags & ~0x01) !== 0) {
+			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: invalid packet flags');
+			return;
+		}
+
+		const isReply = (flags & 0x01) !== 0;
+		const headerLen = isReply ? WS_REPLY_HEADER_LEN : WS_COMMON_HEADER_LEN;
+		if (data.byteLength < headerLen + TAG_LEN) {
+			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: truncated reply header');
+			return;
+		}
+		const headerView = new DataView(data, 0, headerLen);
+		const replyCounter = isReply ? headerView.getBigUint64(WS_COMMON_HEADER_LEN, false) : 0n;
+		if (rxCounter > LAST_USABLE_PACKET_COUNTER) {
+			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: reserved RX counter');
 			return;
 		}
 		if (rxCounter !== this.nextRxCounter) {
@@ -887,16 +908,18 @@ export class Client {
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: RX counter mismatch');
 			return;
 		}
-		this.nextRxCounter += 1;
+		this.nextRxCounter += 1n;
 
 		// Build IV
 		const iv = new Uint8Array(new Uint8Array(this.serverBaseIV));
-		for (let i = 0; i < 4; i++) {
-			iv[SESSION_IV_LEN - i - 1] ^= (rxCounter >> (i << 3)) & 0xff;
+		const counterView = new DataView(new ArrayBuffer(8));
+		counterView.setBigUint64(0, rxCounter, false);
+		for (let i = 0; i < 8; i++) {
+			iv[SESSION_IV_LEN - 8 + i] ^= counterView.getUint8(i);
 		}
 
 		// Try to decrypt
-		const ciphertextView = new DataView(data, PACKET_HEADER_LEN, data.byteLength - PACKET_HEADER_LEN);
+		const ciphertextView = new DataView(data, headerLen, data.byteLength - headerLen);
 		const thisCloseCounter = this.closeCounter;
 		this.serverAes
 			.decrypt(ciphertextView, iv, headerView)
@@ -922,8 +945,8 @@ export class Client {
 			});
 	}
 
-	private onCommand(cmd: number, data: ArrayBuffer, replyCounter: number): void {
-		if (replyCounter !== 0) {
+	private onCommand(cmd: number, data: ArrayBuffer, replyCounter: bigint): void {
+		if (replyCounter !== 0n) {
 			const p = this.waitingReplyMap.get(replyCounter);
 			if (p) {
 				this.waitingReplyMap.delete(replyCounter);
