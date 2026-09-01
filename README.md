@@ -84,6 +84,9 @@ from the `/ws/init` response after the library verifies the server-provided devi
 the connection, returning `false` aborts it with `ConnectionAbortedError`, and thrown errors are propagated from
 `connect()`.
 
+After a successful connection, `client.maxPacketSize` reports the maximum packet size advertised by the device and
+`client.isAdmin` indicates whether the authenticated user has administrator privileges.
+
 ### Cancel connection setup
 
 Pass an `AbortSignal` to cancel an in-progress `connect()` call. The signal affects only setup; aborting it after a

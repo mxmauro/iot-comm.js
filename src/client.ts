@@ -130,11 +130,13 @@ type InitResponse = {
 	serverPublicKey: string;
 	devicePublicKey: string;
 	deviceSignature: string;
+	maxPacketSize: number;
 };
 
 type AuthResponse = {
 	wsNonce: string;
 	mustChangeCredentials: boolean;
+	isAdmin: boolean;
 	wsTicket: string;
 };
 
@@ -179,6 +181,8 @@ export class Client {
 	private ws: IWebSocket | null = null;
 	private closeCounter: number = 0;
 	private _mustChangeCredentials = false;
+	private _isAdmin = false;
+	private _maxPacketSize = 0;
 	private clientAes = createAesCrypto();
 	private serverAes = createAesCrypto();
 	private hkdf = createHkdfCrypto();
@@ -270,6 +274,7 @@ export class Client {
 		let ecdhServerPublicKey: ArrayBuffer;
 		let devicePublicKey: ArrayBuffer;
 		let deviceSignature: ArrayBuffer;
+		let maxPacketSize: number;
 
 		try {
 			if (
@@ -277,11 +282,14 @@ export class Client {
 				typeof initResponse.serverNonce !== 'string' ||
 				typeof initResponse.serverPublicKey !== 'string' ||
 				typeof initResponse.devicePublicKey !== 'string' ||
-				typeof initResponse.deviceSignature !== 'string'
+				typeof initResponse.deviceSignature !== 'string' ||
+				!Number.isSafeInteger(initResponse.maxPacketSize) ||
+				initResponse.maxPacketSize < 1
 			) {
 				throw new Error();
 			}
 
+			maxPacketSize = initResponse.maxPacketSize;
 			cookie = fromB64(initResponse.token);
 			if (cookie.byteLength !== COOKIE_SIZE) {
 				throw new Error();
@@ -393,12 +401,14 @@ export class Client {
 
 		// Parse response
 		let mustChangeCredentials: boolean;
+		let isAdmin: boolean;
 		let wsNonce: ArrayBuffer;
 		let wsTicket: string;
 
 		try {
 			if (
 				typeof authResponse.mustChangeCredentials !== 'boolean' ||
+				typeof authResponse.isAdmin !== 'boolean' ||
 				typeof authResponse.wsNonce !== 'string' ||
 				typeof authResponse.wsTicket !== 'string'
 			) {
@@ -406,6 +416,7 @@ export class Client {
 			}
 
 			mustChangeCredentials = authResponse.mustChangeCredentials;
+			isAdmin = authResponse.isAdmin;
 			wsNonce = fromB64(authResponse.wsNonce);
 			if (wsNonce.byteLength !== NONCE_SIZE) {
 				throw new Error();
@@ -458,6 +469,8 @@ export class Client {
 		this.waitingCloseQueue = [];
 		this.waitingReplyMap = new Map();
 		this._mustChangeCredentials = mustChangeCredentials;
+		this._isAdmin = isAdmin;
+		this._maxPacketSize = maxPacketSize;
 		this.clientBaseIV = clientBaseIV;
 		this.serverBaseIV = serverBaseIV;
 		this.wsNonce = wsNonce;
@@ -477,6 +490,16 @@ export class Client {
 	// Indicates whether the device requires the user credentials to be changed.
 	public get mustChangeCredentials(): boolean {
 		return this._mustChangeCredentials;
+	}
+
+	// Indicates whether the authenticated user has administrator privileges.
+	public get isAdmin(): boolean {
+		return this._isAdmin;
+	}
+
+	// Reports the maximum packet size advertised by the device during connection setup.
+	public get maxPacketSize(): number {
+		return this._maxPacketSize;
 	}
 
 	// Sends a command without waiting for a reply payload.
