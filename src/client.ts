@@ -64,7 +64,7 @@ const CMD_SET_MDNS_HOSTNAME = 0x7000;
 const VERSION = 1;
 const WS_COMMON_HEADER_LEN = 12; // bytes
 const WS_REPLY_HEADER_LEN = 20; // bytes
-const MAX_MSG_SIZE = 2000;
+const WS_MAX_PAYLOAD = 1024 * 1024;
 const MAX_PACKET_COUNTER = 0xffffffffffffffffn;
 const LAST_USABLE_PACKET_COUNTER = MAX_PACKET_COUNTER - 1n;
 
@@ -76,7 +76,6 @@ const AES_KEY_LEN = 32;
 const SESSION_IV_LEN = 12;
 const TAG_LEN = GCM_LEN;
 const OTA_IMAGE_SIZE_LEN = 4;
-const DEFAULT_OTA_CHUNK_SIZE = MAX_MSG_SIZE;
 
 const HANDSHAKE_TIMEOUT_MS = 10000;
 const WEBSOCKET_CONNECT_TIMEOUT_MS = 10000;
@@ -457,7 +456,7 @@ export class Client {
 						Authorization: `Bearer ${wsTicket}`
 					},
 			timeoutMs: WEBSOCKET_CONNECT_TIMEOUT_MS,
-			maxPayload: WS_REPLY_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN,
+			maxPayload: WS_MAX_PAYLOAD,
 			signal: opts.signal
 		});
 
@@ -500,6 +499,11 @@ export class Client {
 	// Reports the maximum packet size advertised by the device during connection setup.
 	public get maxPacketSize(): number {
 		return this._maxPacketSize;
+	}
+
+	// Reports the maximum packet payload size (packet full size minus header and validation tag).
+	public get maxPacketPayloadSize(): number {
+		return this._maxPacketSize - WS_COMMON_HEADER_LEN - TAG_LEN;
 	}
 
 	// Sends a command without waiting for a reply payload.
@@ -693,8 +697,8 @@ export class Client {
 	// Uploads a single OTA firmware chunk to the active OTA session.
 	public async otaWriteCommand(chunk: InputBuffer): Promise<void> {
 		chunk = toDataView(chunk, 'Chunk');
-		if (chunk.byteLength < 1 || chunk.byteLength > DEFAULT_OTA_CHUNK_SIZE) {
-			throw new Error(`Invalid OTA chunk size (max ${DEFAULT_OTA_CHUNK_SIZE} bytes)`);
+		if (chunk.byteLength < 1 || chunk.byteLength > this.maxPacketPayloadSize) {
+			throw new Error(`Invalid OTA chunk size (max ${this.maxPacketPayloadSize} bytes)`);
 		}
 
 		// Execute command
@@ -719,7 +723,7 @@ export class Client {
 			throw new Error('Options must be an object');
 		}
 
-		const chunkSize = validateOtaChunkSize(opts.chunkSize ?? DEFAULT_OTA_CHUNK_SIZE, DEFAULT_OTA_CHUNK_SIZE);
+		const chunkSize = validateOtaChunkSize(opts.chunkSize ?? this.maxPacketPayloadSize, this.maxPacketPayloadSize);
 		const totalBytes = resolveOtaImageSize(opts.image, opts.imageSize);
 		let sentBytes = 0;
 		let chunkIndex = 0;
@@ -839,8 +843,8 @@ export class Client {
 		data = toDataView(data, 'Data');
 
 		// Check data size
-		if (data.byteLength > MAX_MSG_SIZE) {
-			throw new Error(`Data too long (max ${MAX_MSG_SIZE} bytes)`);
+		if (data.byteLength > this.maxPacketPayloadSize) {
+			throw new Error(`Data too long (max ${this.maxPacketPayloadSize} bytes)`);
 		}
 
 		// Get TX counter
@@ -891,7 +895,7 @@ export class Client {
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: packet too short');
 			return;
 		}
-		if (data.byteLength > WS_REPLY_HEADER_LEN + MAX_MSG_SIZE + TAG_LEN) {
+		if (data.byteLength > this.maxPacketSize) {
 			// Packet too short to contain header + tag
 			this.close(CLOSE_INVALID_PAYLOAD, 'Protocol error: packet too long');
 			return;

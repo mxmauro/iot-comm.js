@@ -1,6 +1,6 @@
 {
 	"name": "@mxmauro/iot-comm.js",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Javascript library to communicate with ESP IoT devices using the IoT-Comm library",
 	"license": "MIT",
 	"author": "Mauro H. Leggieri",
@@ -59,12 +59,12 @@
 		"ws": "^8.21.3"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.8",
+		"@biomejs/biome": "2.5.14",
 		"@rsbuild/plugin-node-polyfill": "^1.4.6",
 		"@rsbuild/plugin-type-check": "^1.6.0",
-		"@rsdoctor/rspack-plugin": "^1.6.2",
-		"@rslib/core": "^0.23.2",
-		"@types/node": "^26.2.0",
+		"@rsdoctor/rspack-plugin": "^1.6.4",
+		"@rslib/core": "^1.0.2",
+		"@types/node": "^26.6.2",
 		"@types/ws": "^8.18.1",
 		"@web/dev-server": "^1.0.0",
 		"cross-env": "^10.1.0",
