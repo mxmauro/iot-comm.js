@@ -140,6 +140,30 @@ await client.otaWriteCommand(chunk);
 await client.otaCancelCommand();
 ```
 
+### Configure AudioLight multi-output devices
+
+AudioLightNode V2 stores input and lighting separately. Read or update each complete section over the same authenticated session,
+then reboot only after all requested updates succeed:
+
+```ts
+const input = await client.getInputConfigCommand();
+const lighting = await client.getLightingConfigCommand();
+
+await client.setInputConfigCommand({ ...input, resetGpio: 0xff });
+await client.setLightingConfigCommand([
+	{ type: 'rgb5050', redGpio: 4, greenGpio: 5, blueGpio: 6, activeLow: false },
+	{ type: 'dmx', txGpio: 7, fixtures: [] }
+]);
+await client.rebootCommand();
+```
+
+`0xff` means an input GPIO is not connected. Lighting outputs are ordered slots; the first output is slot `0`. The client rejects
+truncated replies and invalid configuration sections before sending them. Configuration changes are saved but do not take effect until
+`rebootCommand()` succeeds.
+
+Color, fade, set-and-fade, and raw-DMX methods require a slot target (`0` or `1`) or `AUDIO_LIGHT_TARGET_ALL` (`0xff`). A target must
+refer to an active slot; raw DMX on an RGB5050 target is a valid no-op on the device.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.

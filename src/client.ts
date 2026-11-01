@@ -5,15 +5,36 @@ import { hash256 } from '@/crypto/hash';
 import { createHkdfCrypto } from '@/crypto/hkdf';
 import { randomize } from '@/crypto/random';
 import { createWebSocket } from '@/ws';
+import {
+	decodeInputConfig,
+	decodeLightingConfig,
+	encodeFadeToColor,
+	encodeInputConfig,
+	encodeLightingConfig,
+	encodeRawDmxChannels,
+	encodeSetAndFadeToColor,
+	encodeSetColor,
+	type InputConfig,
+	type LightingConfig,
+	type LightingTarget
+} from './config';
 import { GCM_LEN } from './crypto/aes.interface';
 import { ClientClosedError, CommandError, ConnectionAbortedError } from './errors';
+import { encodeHostname, encodeUserName } from './serialization';
 import { fromB64, toB64 } from './utils/base64';
 import { type InputBuffer, toDataView } from './utils/buffer';
+import { toHex } from './utils/hex';
 import type { OtaUploadOptions } from './utils/ota';
 import { iterateOtaChunks, resolveOtaImageSize, validateOtaChunkSize, validateOtaImageSize } from './utils/ota';
 import type { PromiseResolver } from './utils/promise';
 import { throwIfAborted } from './utils/signal';
-import { isValidHostnameAndPort } from './utils/validation';
+import {
+	isValidHostnameAndPort,
+	validatePrivateKey,
+	validatePublicKey,
+	validateUserCreationFlags,
+	validateUserName
+} from './utils/validation';
 import type { CloseEvent, IWebSocket } from './ws/interface';
 import { CLOSE_INTERNAL_ERROR, CLOSE_INVALID_PAYLOAD, CLOSE_NORMAL, CLOSED, OPEN } from './ws/interface';
 
@@ -23,6 +44,20 @@ export { ClientClosedError, CommandError, ConnectionAbortedError } from './error
 export { fromB64, toB64 } from './utils/base64';
 // Re-exports the OTA-related public data types used by the client API.
 export type { OtaImageSource, OtaProgress, OtaUploadOptions } from './utils/ota';
+
+// -----------------------------------------------------------------------------
+
+const CMD_SET_COLOR = 1;
+const CMD_FADE_TO_COLOR = 2;
+const CMD_SET_AND_FADE_TO_COLOR = 3;
+const CMD_SET_RAW_DMX_CHANNEL_DATA = 4;
+const CMD_GET_INPUT_CONFIG = 0x7001;
+const CMD_SET_INPUT_CONFIG = 0x7002;
+const CMD_GET_LIGHTING_CONFIG = 0x7003;
+const CMD_SET_LIGHTING_CONFIG = 0x7004;
+const CMD_REBOOT = 0x7005;
+export const LIGHTING_TARGET_ALL = 'all' as const;
+export type { DmxFixture, DmxLightingConfig, InputConfig, LightingConfig, LightingTarget, Rgb5050LightingConfig } from './config';
 
 // -----------------------------------------------------------------------------
 
@@ -537,29 +572,10 @@ export class Client {
 
 	// Creates a new device user with the provided public key.
 	public async createUserCommand(name: string, publicKey: InputBuffer, flags: number = 0): Promise<void> {
-		if (typeof name !== 'string' || name.length < 1 || name.length > 255) {
-			throw new Error('Invalid user name');
-		}
-		if (
-			!Number.isInteger(flags) ||
-			flags < 0 ||
-			flags > 0xff ||
-			// biome-ignore format: preserve extra parenthesis
-			(flags & (~Client.USER_CREATE_FLAG_MUST_CHANGE_CREDENTIALS_ON_NEXT_LOGIN)) !== 0
-		) {
-			throw new Error('Invalid user creation flags');
-		}
-		try {
-			const ecdsa = createECDSACrypto();
-
-			publicKey = toDataView(publicKey, 'Public key');
-			if (publicKey.byteLength !== P256_PUBLIC_KEY_SIZE) {
-				throw new Error();
-			}
-			await ecdsa.loadRawPublicKey(publicKey);
-		} catch (_err) {
-			throw new Error('Invalid public key');
-		}
+		validateUserName(name);
+		validateUserCreationFlags(flags, Client.USER_CREATE_FLAG_MUST_CHANGE_CREDENTIALS_ON_NEXT_LOGIN);
+		const ecdsa = createECDSACrypto();
+		publicKey = await validatePublicKey(publicKey, (key) => ecdsa.loadRawPublicKey(key));
 
 		// Execute command
 		// biome-ignore format: preserve multiline command payload layout
@@ -567,8 +583,7 @@ export class Client {
 			CMD_CREATE_USER,
 			[
 				Buffer.from([flags]),
-				Buffer.from(`${name}`, 'utf8'),
-				Buffer.from([0]),
+				encodeUserName(name),
 				publicKey
 			]
 		);
@@ -579,17 +594,14 @@ export class Client {
 
 	// Deletes an existing device user.
 	public async deleteUserCommand(name: string): Promise<void> {
-		if (typeof name !== 'string' || name.length < 1 || name.length > 255) {
-			throw new Error('Invalid user name');
-		}
+		validateUserName(name);
 
 		// Execute command
 		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_DELETE_USER,
 			[
-				Buffer.from(`${name}`, 'utf8'),
-				Buffer.from([0])
+				encodeUserName(name)
 			]
 		);
 
@@ -599,28 +611,16 @@ export class Client {
 
 	// Replaces another user's credentials with a new public key.
 	public async resetUserCredentialsCommand(name: string, publicKey: InputBuffer): Promise<void> {
-		if (typeof name !== 'string' || name.length < 1 || name.length > 255) {
-			throw new Error('Invalid user name');
-		}
-		try {
-			const ecdsa = createECDSACrypto();
-
-			publicKey = toDataView(publicKey, 'Public key');
-			if (publicKey.byteLength !== P256_PUBLIC_KEY_SIZE) {
-				throw new Error();
-			}
-			await ecdsa.loadRawPublicKey(publicKey);
-		} catch (_err) {
-			throw new Error('Invalid public key');
-		}
+		validateUserName(name);
+		const ecdsa = createECDSACrypto();
+		publicKey = await validatePublicKey(publicKey, (key) => ecdsa.loadRawPublicKey(key));
 
 		// Execute command
 		// biome-ignore format: preserve multiline command payload layout
 		const reply = await this.sendCommandAndWaitReply(
 			CMD_RESET_USER_CREDENTIALS,
 			[
-				Buffer.from(`${name}`, 'utf8'),
-				Buffer.from([0]),
+				encodeUserName(name),
 				publicKey
 			]
 		);
@@ -633,29 +633,8 @@ export class Client {
 	public async changeUserCredentialsCommand(oldPrivateKey: InputBuffer | string, publicKey: InputBuffer | string): Promise<void> {
 		const ecdsa = createECDSACrypto();
 
-		try {
-			if (typeof oldPrivateKey === 'string') {
-				await ecdsa.loadRawPrivateKey(toDataView(fromB64(oldPrivateKey), 'Old private key'));
-			} else {
-				await ecdsa.loadRawPrivateKey(toDataView(oldPrivateKey, 'Old private key'));
-			}
-		} catch (_err) {
-			throw new Error('Invalid old private key');
-		}
-
-		try {
-			if (typeof publicKey === 'string') {
-				publicKey = toDataView(fromB64(publicKey), 'Public key');
-			} else {
-				publicKey = toDataView(publicKey, 'Public key');
-			}
-			if (publicKey.byteLength !== P256_PUBLIC_KEY_SIZE) {
-				throw new Error();
-			}
-			await ecdsa.loadRawPublicKey(publicKey);
-		} catch (_err) {
-			throw new Error('Invalid public key');
-		}
+		await validatePrivateKey(oldPrivateKey, 'Old private key', (key) => ecdsa.loadRawPrivateKey(key));
+		publicKey = await validatePublicKey(publicKey, (key) => ecdsa.loadRawPublicKey(key));
 
 		// t = "ws-chgcreds-v1" || publicKey || ws_nonce
 		const t = [WS_CHANGE_CREDS, publicKey, this.wsNonce];
@@ -775,21 +754,67 @@ export class Client {
 
 	// Updates the device mDNS hostname.
 	public async setHostnameCommand(hostname: string): Promise<void> {
-		if (typeof hostname !== 'string' || hostname.length < 1 || hostname.length > 64) {
-			throw new Error('Invalid hostname');
-		}
-
 		// Execute command
-		// biome-ignore format: preserve multiline command payload layout
-		const reply = await this.sendCommandAndWaitReply(
-			CMD_SET_MDNS_HOSTNAME,
-			[
-				Buffer.from(`${hostname}`, 'utf8'),
-				Buffer.from([0])
-			]
-		);
+		const reply = await this.sendCommandAndWaitReply(CMD_SET_MDNS_HOSTNAME, encodeHostname(hostname));
 
 		// Wait for server reply
+		this.raiseReplyErrorIfAny(reply);
+	}
+
+	// Gets the AudioLight reset-button and IR-receiver configuration section.
+	public async getInputConfigCommand(): Promise<InputConfig> {
+		const reply = await this.sendCommandAndWaitReply(CMD_GET_INPUT_CONFIG, new ArrayBuffer(0));
+		return decodeInputConfig(reply);
+	}
+
+	// Saves the complete AudioLight reset-button and IR-receiver configuration section.
+	public async setInputConfigCommand(config: InputConfig): Promise<void> {
+		const reply = await this.sendCommandAndWaitReply(CMD_SET_INPUT_CONFIG, encodeInputConfig(config));
+		this.raiseReplyErrorIfAny(reply);
+	}
+
+	// Gets the ordered AudioLight lighting-output configuration section.
+	public async getLightingConfigCommand(): Promise<LightingConfig> {
+		const reply = await this.sendCommandAndWaitReply(CMD_GET_LIGHTING_CONFIG, new ArrayBuffer(0));
+		return decodeLightingConfig(reply);
+	}
+
+	// Saves the complete ordered AudioLight lighting-output configuration section.
+	public async setLightingConfigCommand(config: LightingConfig): Promise<void> {
+		const reply = await this.sendCommandAndWaitReply(CMD_SET_LIGHTING_CONFIG, encodeLightingConfig(config));
+		this.raiseReplyErrorIfAny(reply);
+	}
+
+	// Sets an RGB16 color on one AudioLight slot or all active slots.
+	public async setColorCommand(target: LightingTarget, red: number, green: number, blue: number): Promise<void> {
+		await this.sendCommand(CMD_SET_COLOR, encodeSetColor(target, red, green, blue));
+	}
+
+	// Fades one AudioLight slot or all active slots to an RGB16 color.
+	public async fadeToColorCommand(target: LightingTarget, red: number, green: number, blue: number, milliseconds: number): Promise<void> {
+		await this.sendCommand(CMD_FADE_TO_COLOR, encodeFadeToColor(target, red, green, blue, milliseconds));
+	}
+
+	// Sets an initial RGB16 color, then fades one AudioLight slot or all active slots to an ending color.
+	// biome-ignore format: preserve custom parameter layout
+	public async setAndFadeToColorCommand(
+		target: LightingTarget, startRed: number, startGreen: number, startBlue: number, endRed: number, endGreen: number,
+		endBlue: number, milliseconds: number
+	): Promise<void> {
+		await this.sendCommand(
+			CMD_SET_AND_FADE_TO_COLOR,
+			encodeSetAndFadeToColor(target, startRed, startGreen, startBlue, endRed, endGreen, endBlue, milliseconds)
+		);
+	}
+
+	// Writes a one-based range of raw DMX channels to the selected AudioLight slot or all active slots.
+	public async setRawDmxChannelDataCommand(target: LightingTarget, startChannel: number, data: InputBuffer): Promise<void> {
+		await this.sendCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, encodeRawDmxChannels(target, startChannel, data));
+	}
+
+	// Reboots an AudioLight device after successful configuration updates.
+	public async rebootCommand(): Promise<void> {
+		const reply = await this.sendCommandAndWaitReply(CMD_REBOOT, new ArrayBuffer(0));
 		this.raiseReplyErrorIfAny(reply);
 	}
 
@@ -1073,8 +1098,4 @@ const fetchWithHandshakeTimeout = async <T>(
 		clearTimeout(timeoutId);
 		signal?.removeEventListener('abort', onAbort);
 	}
-};
-
-const toHex = (buf: ArrayBuffer): string => {
-	return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 };
