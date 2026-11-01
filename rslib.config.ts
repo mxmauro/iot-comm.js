@@ -54,7 +54,6 @@ export default defineConfig({
 			format: "esm",
 			syntax: "es2022",
 			dts: true,
-			autoExternal: false,
 			source: {
 				tsconfigPath: './tsconfig.browser.json'
 			},
@@ -63,6 +62,7 @@ export default defineConfig({
 				distPath: {
 					root: "./dist/browser/"
 				},
+				autoExternal: false, // Bundle dependencies
 				minify: true,
 				sourceMap: true,
 				filename: {
@@ -76,7 +76,6 @@ export default defineConfig({
 			syntax: "es2015",
 			dts: false,
 			bundle: true,
-			autoExternal: false, // Bundle dependencies
 			umdName: "iotComm",
 			source: {
 				tsconfigPath: './tsconfig.browser.json'
@@ -86,6 +85,7 @@ export default defineConfig({
 				distPath: {
 					root: "./dist/umd/"
 				},
+				autoExternal: false, // Bundle dependencies
 				minify: true,
 				sourceMap: true,
 				filename: {

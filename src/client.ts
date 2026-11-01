@@ -5,6 +5,7 @@ import { hash256 } from '@/crypto/hash';
 import { createHkdfCrypto } from '@/crypto/hkdf';
 import { randomize } from '@/crypto/random';
 import { createWebSocket } from '@/ws';
+import type { InputConfig, LightingConfig, LightingTarget } from './config';
 import {
 	decodeInputConfig,
 	decodeLightingConfig,
@@ -12,11 +13,9 @@ import {
 	encodeInputConfig,
 	encodeLightingConfig,
 	encodeRawDmxChannels,
+	encodeRawWs281xRgbData,
 	encodeSetAndFadeToColor,
-	encodeSetColor,
-	type InputConfig,
-	type LightingConfig,
-	type LightingTarget
+	encodeSetColor
 } from './config';
 import { GCM_LEN } from './crypto/aes.interface';
 import { ClientClosedError, CommandError, ConnectionAbortedError } from './errors';
@@ -51,13 +50,22 @@ const CMD_SET_COLOR = 1;
 const CMD_FADE_TO_COLOR = 2;
 const CMD_SET_AND_FADE_TO_COLOR = 3;
 const CMD_SET_RAW_DMX_CHANNEL_DATA = 4;
+const CMD_SET_RAW_WS281X_RGB_DATA = 5;
 const CMD_GET_INPUT_CONFIG = 0x7001;
 const CMD_SET_INPUT_CONFIG = 0x7002;
 const CMD_GET_LIGHTING_CONFIG = 0x7003;
 const CMD_SET_LIGHTING_CONFIG = 0x7004;
 const CMD_REBOOT = 0x7005;
 export const LIGHTING_TARGET_ALL = 'all' as const;
-export type { DmxFixture, DmxLightingConfig, InputConfig, LightingConfig, LightingTarget, Rgb5050LightingConfig } from './config';
+export type {
+	DmxFixture,
+	DmxLightingConfig,
+	InputConfig,
+	LightingConfig,
+	LightingTarget,
+	Rgb5050LightingConfig,
+	Ws281xLightingConfig
+} from './config';
 
 // -----------------------------------------------------------------------------
 
@@ -810,6 +818,11 @@ export class Client {
 	// Writes a one-based range of raw DMX channels to the selected AudioLight slot or all active slots.
 	public async setRawDmxChannelDataCommand(target: LightingTarget, startChannel: number, data: InputBuffer): Promise<void> {
 		await this.sendCommand(CMD_SET_RAW_DMX_CHANNEL_DATA, encodeRawDmxChannels(target, startChannel, data));
+	}
+
+	// Writes a one-based range of RGB pixels to the selected WS281x slot or all active slots.
+	public async setRawWs281xRgbDataCommand(target: LightingTarget, firstLed: number, data: InputBuffer): Promise<void> {
+		await this.sendCommand(CMD_SET_RAW_WS281X_RGB_DATA, encodeRawWs281xRgbData(target, firstLed, data));
 	}
 
 	// Reboots an AudioLight device after successful configuration updates.

@@ -13,12 +13,13 @@ const DMX_MAX_FIXTURE_TYPE_BYTES = 32;
 const DMX_MAX_FIXTURE_CHANNELS = 32;
 const DMX_DYNAMIC_COLORING_MIN = 0x0100;
 const DMX_DYNAMIC_COLORING_MAX = 0x0110;
+const WS281X_MAX_LEDS = 300;
 
 // -----------------------------------------------------------------------------
 
 export type InputConfig = {
-	resetGpio: number;
-	irGpio: number;
+	resetGpio?: number;
+	irGpio?: number;
 };
 
 export type DmxFixture = {
@@ -41,9 +42,16 @@ export type Rgb5050LightingConfig = {
 	activeLow: boolean;
 };
 
-export type LightingConfig = (DmxLightingConfig | Rgb5050LightingConfig)[];
+export type Ws281xLightingConfig = {
+	type: 'ws281x';
+	dataGpio: number;
+	mirrorGpio?: number;
+	ledCount: number;
+};
 
-export type LightingTarget = 0 | 1 | typeof LIGHTING_TARGET_ALL;
+export type LightingConfig = (DmxLightingConfig | Rgb5050LightingConfig | Ws281xLightingConfig)[];
+
+export type LightingTarget = 0 | 1 | typeof LIGHTING_TARGET_ALL | undefined;
 
 // -----------------------------------------------------------------------------
 
@@ -55,8 +63,8 @@ export const decodeInputConfig = (data: InputBuffer): InputConfig => {
 	}
 
 	const config = {
-		resetGpio: reader.gpio(true),
-		irGpio: reader.gpio(true)
+		resetGpio: decodeOptionalGpio(reader.gpio(true)),
+		irGpio: decodeOptionalGpio(reader.gpio(true))
 	};
 	reader.assertFinished();
 	return config;
@@ -103,6 +111,13 @@ export const decodeLightingConfig = (data: InputBuffer): LightingConfig => {
 			claimGpio(usedGpios, output.greenGpio, `RGB5050 output ${slot}`);
 			claimGpio(usedGpios, output.blueGpio, `RGB5050 output ${slot}`);
 			config.push(output);
+		} else if (type === 3) {
+			const output = decodeWs281xLightingConfig(reader);
+			claimGpio(usedGpios, output.dataGpio, `WS281x output ${slot}`);
+			if (output.mirrorGpio !== undefined) {
+				claimGpio(usedGpios, output.mirrorGpio, `WS281x output ${slot}`);
+			}
+			config.push(output);
 		} else {
 			throw new Error('Lighting configuration contains an unsupported output type');
 		}
@@ -135,6 +150,9 @@ export const encodeLightingConfig = (config: LightingConfig): ArrayBuffer => {
 		} else if (output.type === 'rgb5050') {
 			bytes.push(2);
 			encodeRgb5050LightingConfig(bytes, output, usedGpios, slot);
+		} else if (output.type === 'ws281x') {
+			bytes.push(3);
+			encodeWs281xLightingConfig(bytes, output, usedGpios, slot);
 		} else {
 			throw new Error(`Lighting output ${slot} has an unsupported type`);
 		}
@@ -145,7 +163,7 @@ export const encodeLightingConfig = (config: LightingConfig): ArrayBuffer => {
 
 // Validates a lighting-slot target accepted by AudioLight control commands.
 export const isLightingTarget = (value: unknown): value is LightingTarget => {
-	return value === 0 || value === 1 || value === LIGHTING_TARGET_ALL;
+	return value === undefined || value === 0 || value === 1 || value === LIGHTING_TARGET_ALL;
 };
 
 // Encodes the target byte and RGB16 values used by the set-color command.
@@ -200,6 +218,25 @@ export const encodeRawDmxChannels = (target: LightingTarget, startChannel: numbe
 	view.setUint16(1, startChannel, false);
 	view.setUint16(3, channels.byteLength, false);
 	bytes.set(new Uint8Array(channels.buffer, channels.byteOffset, channels.byteLength), 5);
+	return bytes.buffer;
+};
+
+// Encodes a target, one-based LED range, and raw RGB data for WS281x strips.
+export const encodeRawWs281xRgbData = (target: LightingTarget, firstLed: number, data: InputBuffer): ArrayBuffer => {
+	const rgb = toDataView(data, 'WS281x RGB data');
+	if (rgb.byteLength < 3 || rgb.byteLength % 3 !== 0 || rgb.byteLength > WS281X_MAX_LEDS * 3) {
+		throw new Error(`WS281x RGB data must contain RGB values for 1 to ${WS281X_MAX_LEDS} LEDs`);
+	}
+	if (!Number.isInteger(firstLed) || firstLed < 1 || firstLed > 0xffff) {
+		throw new Error('First LED must be an unsigned 16-bit integer starting at 1');
+	}
+
+	const bytes = new Uint8Array(5 + rgb.byteLength);
+	const view = new DataView(bytes.buffer);
+	view.setUint8(0, validateLightingTarget(target));
+	view.setUint16(1, firstLed, false);
+	view.setUint16(3, rgb.byteLength / 3, false);
+	bytes.set(new Uint8Array(rgb.buffer, rgb.byteOffset, rgb.byteLength), 5);
 	return bytes.buffer;
 };
 
@@ -312,6 +349,14 @@ const decodeRgb5050LightingConfig = (reader: Reader): Rgb5050LightingConfig => {
 	return { type: 'rgb5050', redGpio, greenGpio, blueGpio, activeLow: activeLow === 1 };
 };
 
+const decodeWs281xLightingConfig = (reader: Reader): Ws281xLightingConfig => {
+	const dataGpio = reader.gpio(false);
+	const mirrorGpio = decodeOptionalGpio(reader.gpio(true));
+	const ledCount = reader.uint16();
+	validateWs281xLedCount(ledCount, 'WS281x LED count');
+	return { type: 'ws281x', dataGpio, mirrorGpio, ledCount };
+};
+
 const encodeDmxLightingConfig = (bytes: number[], output: DmxLightingConfig, usedGpios: Set<number>, slot: number): void => {
 	const txGpio = validateGpio(output.txGpio, false, `DMX output ${slot} TX GPIO`);
 	claimGpio(usedGpios, txGpio, `DMX output ${slot}`);
@@ -359,14 +404,30 @@ const encodeRgb5050LightingConfig = (bytes: number[], output: Rgb5050LightingCon
 	bytes.push(redGpio, greenGpio, blueGpio, output.activeLow ? 1 : 0);
 };
 
-const validateGpio = (value: number, optional: boolean, label: string): number => {
-	if (Number.isInteger(value) && value >= 0 && value <= 0x7f) {
+const encodeWs281xLightingConfig = (bytes: number[], output: Ws281xLightingConfig, usedGpios: Set<number>, slot: number): void => {
+	const dataGpio = validateGpio(output.dataGpio, false, `WS281x output ${slot} data GPIO`);
+	const mirrorGpio = validateGpio(output.mirrorGpio, true, `WS281x output ${slot} mirror GPIO`);
+	const ledCount = validateWs281xLedCount(output.ledCount, `WS281x output ${slot} LED count`);
+	claimGpio(usedGpios, dataGpio, `WS281x output ${slot}`);
+	if (mirrorGpio !== GPIO_NOT_CONNECTED) {
+		claimGpio(usedGpios, mirrorGpio, `WS281x output ${slot}`);
+	}
+	bytes.push(dataGpio, mirrorGpio);
+	writeUint16(bytes, ledCount);
+};
+
+const decodeOptionalGpio = (value: number): number | undefined => {
+	return value === GPIO_NOT_CONNECTED ? undefined : value;
+};
+
+const validateGpio = (value: number | undefined, optional: boolean, label: string): number => {
+	if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0x7f) {
 		return value;
 	}
-	if (optional && value === GPIO_NOT_CONNECTED) {
-		return value;
+	if (optional && value === undefined) {
+		return GPIO_NOT_CONNECTED;
 	}
-	throw new Error(`${label} must be a GPIO from 0 to 127${optional ? ' or 255 for not connected' : ''}`);
+	throw new Error(`${label} must be a GPIO from 0 to 127${optional ? ' or be omitted' : ''}`);
 };
 
 const claimGpio = (usedGpios: Set<number>, gpio: number, label: string): void => {
@@ -405,6 +466,13 @@ const validateColoring = (value: number, label: string): number => {
 	return value;
 };
 
+const validateWs281xLedCount = (value: number, label: string): number => {
+	if (!Number.isInteger(value) || value < 1 || value > WS281X_MAX_LEDS) {
+		throw new Error(`${label} must be from 1 to ${WS281X_MAX_LEDS}`);
+	}
+	return value;
+};
+
 const encodeColor = (target: LightingTarget, red: number, green: number, blue: number): ArrayBuffer => {
 	const bytes = new Uint8Array(7);
 	const view = new DataView(bytes.buffer);
@@ -419,7 +487,7 @@ const validateLightingTarget = (target: LightingTarget): number => {
 	if (!isLightingTarget(target)) {
 		throw new Error('Lighting target must be slot 0, slot 1, or all');
 	}
-	return target === LIGHTING_TARGET_ALL ? 0xff : target;
+	return target === undefined || target === LIGHTING_TARGET_ALL ? 0xff : target;
 };
 
 const validateUint16 = (value: number, label: string): number => {

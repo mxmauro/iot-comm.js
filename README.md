@@ -149,20 +149,22 @@ then reboot only after all requested updates succeed:
 const input = await client.getInputConfigCommand();
 const lighting = await client.getLightingConfigCommand();
 
-await client.setInputConfigCommand({ ...input, resetGpio: 0xff });
+await client.setInputConfigCommand({ ...input, resetGpio: undefined });
 await client.setLightingConfigCommand([
 	{ type: 'rgb5050', redGpio: 4, greenGpio: 5, blueGpio: 6, activeLow: false },
-	{ type: 'dmx', txGpio: 7, fixtures: [] }
+	{ type: 'ws281x', dataGpio: 7, ledCount: 60 }
 ]);
 await client.rebootCommand();
 ```
 
-`0xff` means an input GPIO is not connected. Lighting outputs are ordered slots; the first output is slot `0`. The client rejects
-truncated replies and invalid configuration sections before sending them. Configuration changes are saved but do not take effect until
-`rebootCommand()` succeeds.
+Omit optional input or WS281x mirror GPIOs to leave them disconnected. The protocol's `0xff` representation is translated to and from
+`undefined` internally. Lighting outputs are ordered slots; the first output is slot `0`. The client rejects truncated replies and invalid
+configuration sections before sending them. Configuration changes are saved but do not take effect until `rebootCommand()` succeeds.
 
-Color, fade, set-and-fade, and raw-DMX methods require a slot target (`0` or `1`) or `AUDIO_LIGHT_TARGET_ALL` (`0xff`). A target must
-refer to an active slot; raw DMX on an RGB5050 target is a valid no-op on the device.
+Color, fade, set-and-fade, raw-DMX, and raw-WS281x methods accept a slot target (`0` or `1`), `LIGHTING_TARGET_ALL`, or `undefined`.
+The latter two target every active slot. A slot target must refer to an active slot; a raw command on an incompatible lighting type is a
+valid no-op on the device. WS281x raw data is provided as consecutive red, green, blue bytes;
+`setRawWs281xRgbDataCommand(target, firstLed, data)` addresses LEDs from one.
 
 ## License
 
